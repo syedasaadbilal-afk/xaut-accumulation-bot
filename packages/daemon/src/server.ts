@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
-import { parseConfig } from "./config.js";
+import { parseConfig, type BotConfig } from "./config.js";
 import { hasSecrets, writeSecrets } from "./secrets.js";
 import type { XautService } from "./service.js";
 
@@ -65,6 +65,21 @@ export async function createServer(opts: CreateServerOptions) {
       `Config saved: enabled=${c.enabled}, mode=${c.mode}, chunk $${c.chunkUsd}, strategy cap ${c.strategyCap.enabled ? `${c.strategyCap.maxDistPct}%` : "off"}, new-money cap ${c.newMoneyCap.enabled ? `${c.newMoneyCap.maxDistPct}% (lump >= ${c.newMoneyCap.minLumpPct}%)` : "off"}, position cap ${c.positionCapXaut > 0 ? `${c.positionCapXaut} XAUT` : "off"}`
     );
     if (before.mode !== c.mode) console.log(`[xaut] mode changed ${before.mode} -> ${c.mode}`);
+    return { ok: true };
+  });
+
+  // Run-mode switch for the Status tab: PAUSED = disabled, DRY_RUN / LIVE = enabled in that mode.
+  fastify.put("/api/mode", async (req, reply) => {
+    const m = (req.body as { mode?: string } | undefined)?.mode;
+    if (m !== "DRY_RUN" && m !== "LIVE" && m !== "PAUSED") {
+      reply.code(400);
+      return { error: "mode must be DRY_RUN, LIVE or PAUSED" };
+    }
+    const c = service.store.getConfig();
+    const next: BotConfig = m === "PAUSED" ? { ...c, enabled: false } : { ...c, enabled: true, mode: m };
+    service.store.setConfig(next);
+    service.store.addEvent("config", `Run mode set to ${m}`);
+    console.log(`[xaut] run mode -> ${m}`);
     return { ok: true };
   });
 

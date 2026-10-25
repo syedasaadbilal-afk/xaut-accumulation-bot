@@ -232,6 +232,10 @@ export async function runTick(d: { ex: Exchange; store: Store; now?: number; pol
       ex.getTicker(BTC_UST),
       ex.getWallets(),
     ]);
+    const newest = candles[candles.length - 1];
+    if (!newest || now / 1000 - newest.time > 3 * 86_400) {
+      return finish({ action: "blocked", detail: "candle data is stale or empty (newest bar is more than 3 days old); not trading" });
+    }
     const a = analyze(candles, cfg, now);
     if (!a.last) return finish({ action: "blocked", detail: `not enough daily candles yet (${a.bars.length}); the lines need at least 29` });
     const price = xautBtc.last;

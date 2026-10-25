@@ -299,6 +299,16 @@ describe("runTick", () => {
     expect(ex.wallets["XAUT"]).toBeGreaterThan(11);
   });
 
+  it("refuses to act on stale candles", async () => {
+    const store = newStore();
+    store.setConfig(cfg());
+    const ex = new FakeExchange({ closes: UP_CLOSES, xaut: 1 });
+    const r = await runTick({ ex, store, now: nowAfter(UP_CLOSES.length + 10), pollMs: 0 });
+    expect(r.action).toBe("blocked");
+    expect(r.detail).toMatch(/stale/);
+    expect(ex.orders).toHaveLength(0);
+  });
+
   it("blocked without enough candles", async () => {
     const store = newStore();
     store.setConfig(cfg());

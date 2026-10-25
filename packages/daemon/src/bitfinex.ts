@@ -120,9 +120,10 @@ export class BitfinexExchange implements Exchange {
 
   async getDailyCandles(symbol: string, limit: number): Promise<DailyCandle[]> {
     await this.limiter.wait();
-    const res = await this.fetchImpl(`${PUBLIC_URL}/v2/candles/trade:1D:${symbol}/hist?limit=${limit}&sort=1`);
+    const res = await this.fetchImpl(`${PUBLIC_URL}/v2/candles/trade:1D:${symbol}/hist?limit=${limit}`);
     if (!res.ok) throw new Error(`candles ${symbol} failed: ${res.status} ${await res.text()}`);
     const rows = (await res.json()) as number[][];
+    // Default order is newest first, so `limit` returns the LATEST bars (sort=1 without a start returns the OLDEST).
     // [MTS, OPEN, CLOSE, HIGH, LOW, VOLUME]
     return rows
       .map((r) => ({ time: Math.floor(r[0]! / 1000), open: r[1]!, close: r[2]!, high: r[3]!, low: r[4]! }))

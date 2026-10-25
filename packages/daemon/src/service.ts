@@ -148,6 +148,8 @@ export class XautService {
         signalXautReturnPct: trades.length ? compound(trades.map((t) => t.xautReturnPct)) : 0,
         accountXautReturnPct: twrXautPct(snaps, deposits),
       },
+      tickMs: Number(process.env.XAUT_TICK_MS ?? 60_000),
+      snapshots: snaps.filter((_, i) => i % Math.max(1, Math.ceil(snaps.length / 400)) === 0 || i === snaps.length - 1),
       events: this.store.events(80),
       fills: this.store.fills(40),
       deposits: deposits.slice(0, 30),

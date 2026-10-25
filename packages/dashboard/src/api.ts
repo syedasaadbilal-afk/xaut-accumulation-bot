@@ -63,6 +63,8 @@ export interface StatusDto {
   signals: SignalDto[];
   trades: TradeDto[];
   summary: { trades: number; closed: number; wins: number; signalXautReturnPct: number; accountXautReturnPct: number | null };
+  tickMs: number;
+  snapshots: Array<{ ts: number; xaut: number; btc: number; price: number; equityXaut: number }>;
   events: Array<{ id: number; ts: number; kind: string; summary: string; detail: string | null }>;
   fills: Array<{ id: number; ts: number; rotationId: string; symbol: string; side: "buy" | "sell"; base: number; price: number }>;
   deposits: Array<{ id: number; ts: number; asset: string; amount: number; valueXaut: number; dist: number | null; action: string }>;
@@ -96,3 +98,5 @@ export const saveConfig = (c: BotConfigDto) => send("PUT", "/api/config", c);
 export const saveSecrets = (apiKey: string, apiSecret: string) => send("PUT", "/api/secrets", { apiKey, apiSecret });
 export const runNow = () => send("POST", "/api/run-now");
 export const clearHeldBack = () => send("POST", "/api/clear-held-back");
+
+export const setMode = (mode: "DRY_RUN" | "LIVE" | "PAUSED") => send("PUT", "/api/mode", { mode });
