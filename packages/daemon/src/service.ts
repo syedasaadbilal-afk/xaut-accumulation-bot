@@ -74,6 +74,7 @@ export class XautService {
     let usdPerXaut: number | null = null;
     let usdPerBtc: number | null = null;
     let wallets: ReturnType<typeof walletView> | null = null;
+    let walletRows: Array<{ type: string; currency: string; balance: number; availableBalance: number }> | null = null;
     try {
       const pub = this.exchange(false);
       const [candles, t1, t2, t3] = await Promise.all([pub.getDailyCandles(XAUT_BTC, CANDLE_LIMIT), pub.getTicker(XAUT_BTC), pub.getTicker(XAUT_UST), pub.getTicker(BTC_UST)]);
@@ -86,7 +87,9 @@ export class XautService {
     }
     if (configured) {
       try {
-        wallets = walletView(await this.exchange(true).getWallets());
+        const ex = this.exchange(true);
+        wallets = walletView(await ex.getWallets());
+        if (ex.getAllWallets) walletRows = (await ex.getAllWallets()).filter((w) => Math.abs(w.balance) > 0);
       } catch (err) {
         error = error ?? `wallets: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -119,6 +122,7 @@ export class XautService {
       usdPerXaut,
       usdPerBtc,
       wallets,
+      walletRows,
       equityXaut: wallets && price ? wallets.xaut + wallets.btc / price : null,
       holding,
       desired: analysis ? (analysis.desiredBtc ? "BTC" : "XAUT") : null,

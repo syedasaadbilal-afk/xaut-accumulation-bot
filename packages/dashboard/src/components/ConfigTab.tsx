@@ -144,6 +144,40 @@ export function ConfigTab({ status, reload }: { status: StatusDto | undefined; r
     <div className="space-y-6 p-6">
       <Settings key={JSON.stringify(status.config)} s={status} reload={reload} />
       <Credentials configured={status.configured} reload={reload} />
+      <div className={card}>
+        <h3 className={h3}>Wallets the API key can see</h3>
+        {!status.configured ? (
+          <div className="text-sm text-slate-500">Add an API key first.</div>
+        ) : !status.walletRows || status.walletRows.length === 0 ? (
+          <div className="text-sm text-slate-500">
+            The key works but every wallet is empty. If your BTC or XAUT is in another Bitfinex account, or in a Margin or Funding wallet, move it to this account's Exchange wallet.
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wider text-slate-500 text-left">
+                <th className="pb-1 font-medium">Wallet</th>
+                <th className="pb-1 font-medium">Currency</th>
+                <th className="pb-1 font-medium text-right">Balance</th>
+                <th className="pb-1 font-medium text-right">Available</th>
+                <th className="pb-1 font-medium text-right">Used by bot</th>
+              </tr>
+            </thead>
+            <tbody>
+              {status.walletRows.map((w, i) => (
+                <tr key={i} className="border-t border-slate-800">
+                  <td className="py-1.5">{w.type}</td>
+                  <td className="py-1.5 font-mono">{w.currency}</td>
+                  <td className="py-1.5 font-mono text-right">{w.balance}</td>
+                  <td className="py-1.5 font-mono text-right">{w.availableBalance}</td>
+                  <td className="py-1.5 text-right text-xs">{w.type === "exchange" && ["BTC", "XAUT", "UST"].includes(w.currency) ? <span className="text-emerald-400">yes</span> : <span className="text-slate-500">no</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="text-xs text-slate-500 mt-2">The bot only uses BTC, XAUT and UST (USDT) in the Exchange wallet.</p>
+      </div>
     </div>
   );
 }

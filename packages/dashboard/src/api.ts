@@ -64,6 +64,7 @@ export interface StatusDto {
   usdPerXaut: number | null;
   usdPerBtc: number | null;
   wallets: { xaut: number; btc: number; xautAvail: number; btcAvail: number; ustAvail: number } | null;
+  walletRows: Array<{ type: string; currency: string; balance: number; availableBalance: number }> | null;
   equityXaut: number | null;
   holding: "BTC" | "XAUT" | "MIXED" | "EMPTY" | null;
   desired: "BTC" | "XAUT" | null;

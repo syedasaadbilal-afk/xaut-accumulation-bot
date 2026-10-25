@@ -35,6 +35,8 @@ export interface Exchange {
   getTicker(symbol: string): Promise<Ticker>;
   getMinOrderSize(symbol: string): Promise<number>;
   getWallets(): Promise<WalletBalance[]>;
+  /** Diagnostics: every wallet row on the account, any wallet type (exchange, margin, funding). */
+  getAllWallets?(): Promise<Array<WalletBalance & { type: string }>>;
   submitOrder(order: { symbol: string; amount: number; price: string }): Promise<SubmitResult>;
   getOrderFill(symbol: string, orderId: string): Promise<OrderFill>;
   cancelOrder(orderId: string): Promise<void>;
@@ -184,6 +186,11 @@ export class BitfinexExchange implements Exchange {
     return rows
       .filter((r) => r[0] === "exchange")
       .map((r) => ({ currency: r[1], balance: r[2], availableBalance: r[4] ?? r[2] }));
+  }
+
+  async getAllWallets(): Promise<Array<WalletBalance & { type: string }>> {
+    const rows = (await this.authPost("v2/auth/r/wallets")) as Array<[string, string, number, number, number | null]>;
+    return rows.map((r) => ({ type: r[0], currency: r[1], balance: r[2], availableBalance: r[4] ?? r[2] }));
   }
 
   async submitOrder(order: { symbol: string; amount: number; price: string }): Promise<SubmitResult> {
