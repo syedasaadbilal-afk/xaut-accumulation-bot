@@ -1,9 +1,9 @@
 import { IMPOSSIBLE, VersionInfo } from '@start9labs/start-sdk'
 export const current = VersionInfo.of({
-  version: '0.1.0:0',
+  version: '0.1.2:0',
   releaseNotes: {
     en_US:
-      'Initial release: accumulates XAUT on Bitfinex by rotating between XAUT and BTC with a mirrored Larsson Line (BTC priced in XAUT). Boots disabled and in dry-run mode. Optional strategy entry cap and new-money cap, both off by default.',
+      'Timeline now matches the BTC Yield Autopilot: an executions table built from real order fills, and a TradingView-style trades table that shows the actual fill price next to the signal price, with net PnL in XAUT, return, win rate and closed trades.',
   },
   migrations: { up: async ({ effects }) => {}, down: IMPOSSIBLE },
 })

@@ -17,6 +17,8 @@ function Settings({ s, reload }: { s: StatusDto; reload: () => Promise<void> }) 
   const [chunk, setChunk] = useState(String(c.chunkUsd));
   const [minTrade, setMinTrade] = useState(String(c.minTradeUsd));
   const [posCap, setPosCap] = useState(String(c.positionCapXaut));
+  const [ddEn, setDdEn] = useState(c.dailyDeployCap.enabled);
+  const [ddUsd, setDdUsd] = useState(String(c.dailyDeployCap.maxUsd));
   const [sEn, setSEn] = useState(c.strategyCap.enabled);
   const [sPct, setSPct] = useState(String(c.strategyCap.maxDistPct));
   const [nEn, setNEn] = useState(c.newMoneyCap.enabled);
@@ -31,6 +33,7 @@ function Settings({ s, reload }: { s: StatusDto; reload: () => Promise<void> }) 
       chunkUsd: Number(chunk),
       minTradeUsd: Number(minTrade),
       positionCapXaut: Number(posCap),
+      dailyDeployCap: { enabled: ddEn, maxUsd: Number(ddUsd) },
       strategyCap: { enabled: sEn, maxDistPct: Number(sPct) },
       newMoneyCap: { enabled: nEn, maxDistPct: Number(nPct), minLumpPct: Number(nLump) },
     };
@@ -47,6 +50,20 @@ function Settings({ s, reload }: { s: StatusDto; reload: () => Promise<void> }) 
           <NumField label="Order size" value={chunk} onChange={setChunk} suffix="USD per order" />
           <NumField label="Ignore below" value={minTrade} onChange={setMinTrade} suffix="USD" />
           <NumField label="Position cap" value={posCap} onChange={setPosCap} suffix="XAUT in BTC at once (0 = none)" />
+        </div>
+
+        <div className="border border-slate-800 rounded p-3 space-y-2">
+          <div className="text-xs uppercase tracking-wider text-slate-400">Daily deployment cap</div>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={ddEn} onChange={(e) => setDdEn(e.target.checked)} />
+              Use it
+            </label>
+            <NumField label="Move at most" value={ddUsd} onChange={setDdUsd} suffix="USD into BTC per rolling 24h" />
+          </div>
+          <p className="text-xs text-slate-500">
+            Limits money going from XAUT into BTC, so a big deposit or the first deployment is drip-fed instead of hitting the order book at once. The rest follows as the 24h window rolls. Moving back to XAUT is never capped.
+          </p>
         </div>
 
         <div className="border border-slate-800 rounded p-3 space-y-2">

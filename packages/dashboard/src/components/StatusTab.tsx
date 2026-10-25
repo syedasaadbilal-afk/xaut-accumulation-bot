@@ -111,6 +111,7 @@ export function StatusTab({
           sublabel={s.caps.newMoney.enabled ? (s.caps.newMoney.wouldHoldBackNow ? "a deposit would be held" : "a deposit would deploy") : undefined}
           valueColor={s.caps.newMoney.wouldHoldBackNow ? "text-amber-400" : "text-slate-100"}
         />
+        <MetricTile label="Daily deploy cap" value={s.config.dailyDeployCap.enabled ? `$${s.config.dailyDeployCap.maxUsd.toLocaleString()}` : "off"} sublabel={s.config.dailyDeployCap.enabled ? `$${s.deployed24hUsd.toFixed(0)} into BTC in last 24h` : undefined} valueColor={s.config.dailyDeployCap.enabled && s.deployed24hUsd >= s.config.dailyDeployCap.maxUsd ? "text-amber-400" : "text-slate-100"} />
         <MetricTile label="Position cap" value={s.config.positionCapXaut > 0 ? `${s.config.positionCapXaut} XAUT` : "off"} />
         <MetricTile label="Strategy XAUT gain" value={fmtPct(s.summary.signalXautReturnPct)} valueColor={pctCls(s.summary.signalXautReturnPct)} sublabel="chart signals, compounded" />
       </div>

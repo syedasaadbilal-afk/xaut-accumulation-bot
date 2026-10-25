@@ -1,72 +1,154 @@
-import type { StatusDto } from "../api.js";
+import type { ExecutionDto, StatusDto, TradeDto } from "../api.js";
 import { card, fmtDate, fmtPct, fmtTs, h3, num, pctCls } from "../format.js";
 
-/** Timeline tab: strategy trades, order fills, deposits seen, and the activity log. */
+const KIND: Record<ExecutionDto["kind"], string> = {
+  to_btc: "Entry (XAUT → BTC)",
+  to_xaut: "Exit (BTC → XAUT)",
+  sweep_btc: "Sweep (USDT → BTC)",
+  sweep_xaut: "Sweep (USDT → XAUT)",
+};
+
+function amt(asset: string | null, v: number): string {
+  return asset === null ? "-" : `${v.toFixed(asset === "BTC" ? 6 : 4)} ${asset}`;
+}
+
+function Executions({ rows }: { rows: ExecutionDto[] }) {
+  if (rows.length === 0) return <div className="text-sm text-slate-500 py-2">No orders yet. Dry-run plans are in the activity log below.</div>;
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-[11px] uppercase tracking-wider text-slate-500 text-left">
+          <th className="pr-3 pb-1 font-medium">Date and time</th>
+          <th className="pr-3 pb-1 font-medium">Type</th>
+          <th className="pr-3 pb-1 font-medium text-right">Sold</th>
+          <th className="pr-3 pb-1 font-medium text-right">Bought</th>
+          <th className="pr-3 pb-1 font-medium">Detail</th>
+          <th className="pb-1 font-medium text-right">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((e) => (
+          <tr key={e.rotationId} className="border-t border-slate-800 align-top">
+            <td className="py-2 pr-3 font-mono text-xs whitespace-nowrap">{fmtTs(e.ts)}</td>
+            <td className="py-2 pr-3">{KIND[e.kind]}</td>
+            <td className="py-2 pr-3 font-mono text-right">{amt(e.soldAsset, e.sold)}</td>
+            <td className="py-2 pr-3 font-mono text-right">{amt(e.boughtAsset, e.bought)}</td>
+            <td className="py-2 pr-3 text-xs text-slate-500">
+              {e.orders} order{e.orders === 1 ? "" : "s"}
+              {e.ratio !== null ? ` · ${e.ratio.toFixed(3)} XAUT per BTC` : ""}
+              {e.btcUsd !== null ? ` · BTC $${e.btcUsd.toFixed(0)}` : ""}
+              {e.xautUsd !== null ? ` · XAUT $${e.xautUsd.toFixed(2)}` : ""}
+            </td>
+            <td className="py-2 text-right">
+              <span className="text-[11px] px-2 py-0.5 rounded border border-emerald-800 bg-emerald-950/50 text-emerald-300">executed</span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function TradeBlock({ t, n }: { t: TradeDto; n: number }) {
+  const a = t.actual;
+  const sigOnly = a === null;
+  const retActual = a?.returnPct ?? null;
+  return (
+    <tbody>
+      <tr className="border-t border-slate-800 align-top">
+        <td className="py-2 pr-3 text-slate-500" rowSpan={2}>
+          {n}
+        </td>
+        <td className="py-2 pr-3 text-sky-400" rowSpan={2}>
+          long BTC
+        </td>
+        <td className="py-2 pr-3 text-slate-400">{t.status === "open" ? "Open" : "Exit"} <span className="font-mono text-slate-200">{t.status === "open" ? "now" : fmtDate(t.exitTime)}</span></td>
+        <td className="py-2 pr-3 font-mono">
+          {a?.exitPrice != null ? a.exitPrice.toFixed(4) : sigOnly ? (t.status === "open" ? "mark" : num(t.exitSignal, 4)) : "-"}
+          {!sigOnly && t.status === "closed" && <div className="text-xs text-slate-500">signal {num(t.exitSignal, 4)}</div>}
+        </td>
+        <td className="py-2 pr-3 font-mono">{a ? `${a.sizeBtc.toFixed(6)} BTC` : "-"}</td>
+        <td className={`py-2 pr-3 font-mono ${pctCls(a?.pnlXaut ?? t.xautReturnPct)}`} rowSpan={2}>
+          {a?.pnlXaut != null ? `${a.pnlXaut >= 0 ? "+" : ""}${a.pnlXaut.toFixed(4)} XAUT` : "-"}
+          <div className="text-xs text-slate-500">{a ? (t.signalPnlXaut != null ? `signal ${t.signalPnlXaut >= 0 ? "+" : ""}${t.signalPnlXaut.toFixed(4)} XAUT` : "") : "signal prices only"}</div>
+        </td>
+        <td className={`py-2 font-mono text-right ${pctCls(retActual ?? t.xautReturnPct)}`} rowSpan={2}>
+          {fmtPct(retActual ?? t.xautReturnPct)}
+          <div className="text-xs text-slate-500">{a ? `signal ${fmtPct(t.xautReturnPct)}` : "signal prices only"}</div>
+        </td>
+      </tr>
+      <tr>
+        <td className="pb-2 pr-3 text-slate-400">Entry <span className="font-mono text-slate-200">{fmtDate(t.entryTime)}</span></td>
+        <td className="pb-2 pr-3 font-mono">
+          {a?.entryPrice != null ? a.entryPrice.toFixed(4) : num(t.entrySignal, 4)}
+          {a && <div className="text-xs text-slate-500">signal {num(t.entrySignal, 4)}</div>}
+        </td>
+        <td className="pb-2 pr-3 font-mono">{a ? `${a.sizeBtc.toFixed(6)} BTC` : "-"}</td>
+      </tr>
+    </tbody>
+  );
+}
+
+/** Timeline tab, same sections as the BTC Yield Autopilot: executions, trades (signal vs actual), then the logs. */
 export function TimelineTab({ status }: { status: StatusDto | undefined }) {
   if (!status) return <div className="text-slate-500 p-6">Loading...</div>;
   const s = status;
+  const sm = s.summary;
   return (
     <div className="space-y-6 p-6">
       <div className={card}>
-        <h3 className={h3}>Strategy trades (chart signals, newest first)</h3>
+        <h3 className={h3}>Executions (entries, exits and sweeps, from real order fills)</h3>
+        <div className="overflow-x-auto">
+          <Executions rows={s.executions} />
+        </div>
+      </div>
+
+      <div className={card}>
+        <h3 className={h3}>Trades (TradingView style: entry into BTC, exit back to XAUT)</h3>
+        <div className="flex flex-wrap gap-6 text-sm text-slate-400 mb-3">
+          <span>
+            Closed trades (executed): <span className="text-slate-100">{sm.actualClosed}</span>
+          </span>
+          <span>
+            Win rate: <span className="text-slate-100">{sm.actualClosed > 0 ? `${Math.round((sm.actualWins / sm.actualClosed) * 100)}%` : "-"}</span>
+          </span>
+          <span>
+            Net PnL: <span className={pctCls(sm.actualNetPnlXaut)}>{sm.actualClosed > 0 || sm.actualNetPnlXaut !== 0 ? `${sm.actualNetPnlXaut >= 0 ? "+" : ""}${sm.actualNetPnlXaut.toFixed(4)} XAUT` : "-"}</span>
+          </span>
+          <span>
+            Chart signals: <span className="text-slate-100">{sm.closed} closed, {sm.wins} wins, {fmtPct(sm.signalXautReturnPct)} compounded</span>
+          </span>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-[11px] uppercase tracking-wider text-slate-500 text-left">
-                <th className="pr-3 pb-1 font-medium">Status</th>
-                <th className="pr-3 pb-1 font-medium">Entry (to BTC)</th>
-                <th className="pr-3 pb-1 font-medium">Exit (to XAUT)</th>
-                <th className="pr-3 pb-1 font-medium text-right">Entry price</th>
-                <th className="pr-3 pb-1 font-medium text-right">Exit price</th>
-                <th className="pb-1 font-medium text-right">XAUT gained</th>
+                <th className="pr-3 pb-1 font-medium">Trade #</th>
+                <th className="pr-3 pb-1 font-medium">Type</th>
+                <th className="pr-3 pb-1 font-medium">Date</th>
+                <th className="pr-3 pb-1 font-medium">Price (XAUT per BTC)</th>
+                <th className="pr-3 pb-1 font-medium">Size</th>
+                <th className="pr-3 pb-1 font-medium">Net PnL</th>
+                <th className="pb-1 font-medium text-right">Return</th>
               </tr>
             </thead>
-            <tbody>
-              {s.trades.length === 0 && (
+            {s.trades.length === 0 && (
+              <tbody>
                 <tr>
-                  <td colSpan={6} className="py-3 text-slate-500">No signals in the available history.</td>
+                  <td colSpan={7} className="py-3 text-slate-500">
+                    No signals in the available history.
+                  </td>
                 </tr>
-              )}
-              {s.trades.map((t) => (
-                <tr key={t.entryTime} className="border-t border-slate-800">
-                  <td className="py-1.5 pr-3">{t.status}</td>
-                  <td className="py-1.5 pr-3 font-mono">{fmtDate(t.entryTime)}</td>
-                  <td className="py-1.5 pr-3 font-mono">{fmtDate(t.exitTime)}</td>
-                  <td className="py-1.5 pr-3 font-mono text-right">{num(t.entrySignal, 3)}</td>
-                  <td className="py-1.5 pr-3 font-mono text-right">{t.status === "open" ? "mark" : num(t.exitSignal, 3)}</td>
-                  <td className={`py-1.5 font-mono text-right ${pctCls(t.xautReturnPct)}`}>{fmtPct(t.xautReturnPct)}</td>
-                </tr>
-              ))}
-            </tbody>
+              </tbody>
+            )}
+            {s.trades.map((t, i) => (
+              <TradeBlock key={t.entryTime} t={t} n={s.trades.length - i} />
+            ))}
           </table>
         </div>
         <p className="text-xs text-slate-500 mt-2">
-          Signal results (next daily open after the confirmed close), in XAUT, before fees and slippage. A backtest of the rule, not of this account. Prices are XAUT per BTC. Wins: {s.summary.wins} of {s.summary.closed} closed.
+          Price = what the bot actually got (average of the real fills, XAUT per BTC); "signal" = the chart's next-open price. Trades the bot did not execute (before it started) show "signal prices only". Net PnL is in XAUT, before fees, and open trades are marked to the current price.
         </p>
-      </div>
-
-      <div className={card}>
-        <h3 className={h3}>Order fills</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <tbody>
-              {s.fills.length === 0 && (
-                <tr>
-                  <td className="py-2 text-slate-500">No orders yet.</td>
-                </tr>
-              )}
-              {s.fills.map((f) => (
-                <tr key={f.id} className="border-t border-slate-800">
-                  <td className="py-1.5 pr-3 font-mono text-xs text-slate-400 whitespace-nowrap">{fmtTs(f.ts)}</td>
-                  <td className={`py-1.5 pr-3 ${f.side === "buy" ? "text-emerald-400" : "text-red-400"}`}>{f.side}</td>
-                  <td className="py-1.5 pr-3 font-mono">{f.symbol}</td>
-                  <td className="py-1.5 pr-3 font-mono text-right">{num(f.base, 6)}</td>
-                  <td className="py-1.5 font-mono text-right">{num(f.price, 2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       </div>
 
       <div className={card}>

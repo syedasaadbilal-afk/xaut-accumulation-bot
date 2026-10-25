@@ -7,9 +7,10 @@ import { rotate } from "../src/execute.js";
 import { computeLarsson, invertCandles, replaySignals } from "../src/larsson.js";
 import { twrXautPct } from "../src/service.js";
 import { Store } from "../src/store.js";
+import { attachActual, buildExecutions } from "../src/timeline.js";
 import { DOWN_CLOSES, FakeExchange, UP_CLOSES, nowAfter, xautBtcPath } from "./helpers.js";
 
-const cfg = (over: Partial<BotConfig> = {}): BotConfig => ({ ...DEFAULT_CONFIG, enabled: true, mode: "LIVE", ...over });
+const cfg = (over: Partial<BotConfig> = {}): BotConfig => ({ ...DEFAULT_CONFIG, enabled: true, mode: "LIVE", dailyDeployCap: { enabled: false, maxUsd: 2000 }, ...over });
 const newStore = () => {
   const db = openDatabase(":memory:");
   applyMigrations(db);
@@ -187,6 +188,55 @@ describe("planTick", () => {
   });
 });
 
+describe("daily deployment cap", () => {
+  const w = { xaut: 10, btc: 0, xautAvail: 10, btcAvail: 0, ustAvail: 0 }; // 10 XAUT = $40,000 at $4,000
+  const on = cfg({ dailyDeployCap: { enabled: true, maxUsd: 2000 } });
+
+  it("defaults to on at $2,000", () => {
+    expect(DEFAULT_CONFIG.dailyDeployCap).toEqual({ enabled: true, maxUsd: 2000 });
+  });
+
+  it("limits a big conversion into BTC to the room left in the rolling 24h", () => {
+    const p = planTick(baseInput({ cfg: on, wallets: w, deployedUsd24h: 0 }));
+    expect(p.action.kind).toBe("to_btc");
+    expect((p.action as { xaut: number }).xaut).toBeCloseTo(0.5, 9); // $2,000 / $4,000
+    const q = planTick(baseInput({ cfg: on, wallets: w, deployedUsd24h: 1200 }));
+    expect((q.action as { xaut: number }).xaut).toBeCloseTo(0.2, 9);
+  });
+
+  it("waits when the cap is used up, and never caps the exit back to XAUT", () => {
+    const p = planTick(baseInput({ cfg: on, wallets: w, deployedUsd24h: 2000 }));
+    expect(p.action.kind).toBe("none");
+    expect((p.action as { why: string }).why).toMatch(/daily deployment cap/);
+    const exit = planTick(baseInput({ cfg: on, desiredBtc: false, wallets: { xaut: 0, btc: 5, xautAvail: 0, btcAvail: 5, ustAvail: 0 }, deployedUsd24h: 99999 }));
+    expect(exit.action).toEqual({ kind: "to_xaut", btc: 5 });
+  });
+
+  it("is ignored when switched off", () => {
+    expect(planTick(baseInput({ cfg: cfg(), wallets: w, deployedUsd24h: 99999 })).action).toEqual({ kind: "to_btc", xaut: 10 });
+  });
+
+  it("runTick drip-feeds: first tick moves ~$2,000, the next tick (cap used) moves nothing", async () => {
+    const store = newStore();
+    store.setConfig({ ...on, chunkUsd: 500 });
+    const ex = new FakeExchange({ closes: UP_CLOSES, xaut: 10 });
+    const NOW = nowAfter(UP_CLOSES.length);
+    const r1 = await runTick({ ex, store, now: NOW, pollMs: 0 });
+    expect(r1.action).toBe("rotated");
+    expect(ex.wallets["XAUT"]).toBeGreaterThan(9.4);
+    expect(ex.wallets["XAUT"]).toBeLessThan(9.6);
+    expect(store.deployedUsdSince(0)).toBeGreaterThan(1900);
+    const r2 = await runTick({ ex, store, now: NOW + 60_000, pollMs: 0 });
+    expect(r2.action).toBe("idle");
+    expect(r2.detail).toMatch(/daily deployment cap/);
+  });
+
+  it("validates the setting", () => {
+    expect("error" in parseConfig({ ...DEFAULT_CONFIG, dailyDeployCap: { enabled: true, maxUsd: 0 } })).toBe(true);
+    expect("config" in parseConfig({ ...DEFAULT_CONFIG, dailyDeployCap: { enabled: false, maxUsd: 5000 } })).toBe(true);
+  });
+});
+
 describe("rotate (executor)", () => {
   it("sells XAUT for USDT then buys BTC with the proceeds, chunk by chunk, one order at a time", async () => {
     const ex = new FakeExchange({ closes: UP_CLOSES, xaut: 2 });
@@ -350,5 +400,55 @@ describe("config and account return", () => {
     const deps = [{ id: 1, ts: 2, asset: "XAUT", amount: 10, valueXaut: 10, dist: null, action: "x" }];
     expect(twrXautPct(snaps, deps)).toBeCloseTo(10, 9);
     expect(twrXautPct(snaps.slice(0, 1), deps)).toBeNull();
+  });
+});
+
+describe("timeline: executions and signal vs actual trades", () => {
+  const f = (id: number, ts: number, rotationId: string, symbol: string, side: "buy" | "sell", base: number, price: number) => ({ id, ts, rotationId, symbol, side, base, price });
+  const DAYMS = 86_400_000;
+  const t0 = 1_700_000_000_000;
+  // Entry: sell 2 XAUT at $4,000, buy 0.08 BTC at $100,000 -> 25 XAUT per BTC. Exit: sell 0.08 BTC at $100,000, buy 2.2 XAUT at $3,636.36 -> 27.5 XAUT per BTC.
+  const fills = [
+    f(1, t0 + 1000, "A", "tXAUT:UST", "sell", 2, 4000),
+    f(2, t0 + 2000, "A", "tBTCUST", "buy", 0.08, 100000),
+    f(3, t0 + 10 * DAYMS + 1000, "B", "tBTCUST", "sell", 0.08, 100000),
+    f(4, t0 + 10 * DAYMS + 2000, "B", "tXAUT:UST", "buy", 2.2, 8000 / 2.2),
+  ];
+
+  it("groups fills into one execution per rotation with the implied XAUT-per-BTC price", () => {
+    const ex = buildExecutions(fills);
+    expect(ex.map((e) => e.kind)).toEqual(["to_xaut", "to_btc"]); // newest first
+    const entry = ex[1]!;
+    expect(entry.sold).toBe(2);
+    expect(entry.bought).toBe(0.08);
+    expect(entry.ratio).toBeCloseTo(25, 9);
+  });
+
+  it("measures a closed trade from the real fills, next to the signal prices", () => {
+    const signalTrade = {
+      entryTime: Math.floor(t0 / 1000),
+      entrySignal: 24,
+      exitTime: Math.floor((t0 + 10 * DAYMS) / 1000),
+      exitSignal: 27,
+      status: "closed" as const,
+      xautReturnPct: 12.5,
+    };
+    const [row] = attachActual([signalTrade], fills, 28);
+    expect(row!.actual!.entryPrice).toBeCloseTo(25, 9);
+    expect(row!.actual!.exitPrice).toBeCloseTo(27.5, 9);
+    expect(row!.actual!.sizeBtc).toBeCloseTo(0.08, 12);
+    expect(row!.actual!.pnlXaut).toBeCloseTo(0.08 * 2.5, 9);
+    expect(row!.actual!.returnPct).toBeCloseTo(10, 9);
+    expect(row!.signalPnlXaut).toBeCloseTo(0.08 * 3, 9);
+  });
+
+  it("marks an open trade to the current price, and leaves unexecuted history as signal-only", () => {
+    const open = { entryTime: Math.floor(t0 / 1000), entrySignal: 24, exitTime: null, exitSignal: null, status: "open" as const, xautReturnPct: 16.7 };
+    const old = { entryTime: Math.floor(t0 / 1000) - 400 * 86_400, entrySignal: 20, exitTime: Math.floor(t0 / 1000) - 390 * 86_400, exitSignal: 21, status: "closed" as const, xautReturnPct: 5 };
+    const rows = attachActual([old, open], fills.slice(0, 2), 30);
+    expect(rows[0]!.status).toBe("open");
+    expect(rows[0]!.actual!.returnPct).toBeCloseTo(20, 9); // 30 / 25 - 1
+    expect(rows[0]!.actual!.pnlXaut).toBeCloseTo(0.08 * 5, 9);
+    expect(rows[1]!.actual).toBeNull();
   });
 });

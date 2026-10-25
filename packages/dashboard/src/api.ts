@@ -6,6 +6,7 @@ export interface BotConfigDto {
   chunkUsd: number;
   minTradeUsd: number;
   positionCapXaut: number;
+  dailyDeployCap: { enabled: boolean; maxUsd: number };
   strategyCap: { enabled: boolean; maxDistPct: number };
   newMoneyCap: { enabled: boolean; maxDistPct: number; minLumpPct: number };
 }
@@ -36,6 +37,22 @@ export interface TradeDto {
   exitSignal: number | null;
   status: "open" | "closed";
   xautReturnPct: number | null;
+  actual: { entryPrice: number | null; exitPrice: number | null; sizeBtc: number; pnlXaut: number | null; returnPct: number | null } | null;
+  signalPnlXaut: number | null;
+}
+
+export interface ExecutionDto {
+  rotationId: string;
+  ts: number;
+  kind: "to_btc" | "to_xaut" | "sweep_btc" | "sweep_xaut";
+  soldAsset: "XAUT" | "BTC" | null;
+  sold: number;
+  boughtAsset: "XAUT" | "BTC";
+  bought: number;
+  xautUsd: number | null;
+  btcUsd: number | null;
+  orders: number;
+  ratio: number | null;
 }
 
 export interface StatusDto {
@@ -62,8 +79,10 @@ export interface StatusDto {
   bars: BarDto[];
   signals: SignalDto[];
   trades: TradeDto[];
-  summary: { trades: number; closed: number; wins: number; signalXautReturnPct: number; accountXautReturnPct: number | null };
+  executions: ExecutionDto[];
+  summary: { trades: number; closed: number; wins: number; signalXautReturnPct: number; accountXautReturnPct: number | null; actualClosed: number; actualWins: number; actualNetPnlXaut: number };
   tickMs: number;
+  deployed24hUsd: number;
   snapshots: Array<{ ts: number; xaut: number; btc: number; price: number; equityXaut: number }>;
   events: Array<{ id: number; ts: number; kind: string; summary: string; detail: string | null }>;
   fills: Array<{ id: number; ts: number; rotationId: string; symbol: string; side: "buy" | "sell"; base: number; price: number }>;

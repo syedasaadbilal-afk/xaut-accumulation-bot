@@ -1,7 +1,7 @@
 {
   "name": "xaut-accumulation-bot",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "XAUT accumulation bot for Bitfinex: mirrored Larsson Line on BTC priced in XAUT. Spot only, small limit orders one at a time.",
   "workspaces": [
     "packages/*"

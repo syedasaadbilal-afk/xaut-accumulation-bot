@@ -48,6 +48,7 @@ export class Store {
     return {
       ...DEFAULT_CONFIG,
       ...saved,
+      dailyDeployCap: { ...DEFAULT_CONFIG.dailyDeployCap, ...(saved.dailyDeployCap ?? {}) },
       strategyCap: { ...DEFAULT_CONFIG.strategyCap, ...(saved.strategyCap ?? {}) },
       newMoneyCap: { ...DEFAULT_CONFIG.newMoneyCap, ...(saved.newMoneyCap ?? {}) },
     };
@@ -90,6 +91,17 @@ export class Store {
     this.db
       .prepare("INSERT INTO fills (ts, rotation_id, symbol, side, base, price) VALUES (?, ?, ?, ?, ?, ?)")
       .run(f.ts, f.rotationId, f.symbol, f.side, f.base, f.price);
+  }
+
+  /** USD spent buying BTC with USDT since `sinceMs` (the money deployed INTO BTC). */
+  deployedUsdSince(sinceMs: number): number {
+    const r = this.db.prepare("SELECT COALESCE(SUM(base * price), 0) AS usd FROM fills WHERE symbol = 'tBTCUST' AND side = 'buy' AND ts > ?").get(sinceMs) as { usd: number } | undefined;
+    return r?.usd ?? 0;
+  }
+
+  /** Every fill, oldest first (the timeline groups them into rotations and trades). */
+  allFills(): FillRow[] {
+    return this.fills(100000).reverse();
   }
 
   fills(limit = 100): FillRow[] {

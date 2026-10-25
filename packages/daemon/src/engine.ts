@@ -84,6 +84,8 @@ export interface PlanInput {
   desiredBtc: boolean;
   /** Distance of BTC (in XAUT) above its Larsson baseline, as a fraction; null while warming up. */
   dist: number | null;
+  /** USD already deployed into BTC in the last 24h (for the daily deployment cap). */
+  deployedUsd24h?: number;
 }
 
 export interface DepositFound {
@@ -191,6 +193,23 @@ export function planTick(i: PlanInput): Plan {
         why = ` (position cap ${cfg.positionCapXaut} XAUT)`;
       }
     }
+    if (cfg.dailyDeployCap.enabled && sell * i.usdPerXaut >= cfg.minTradeUsd) {
+      const used = i.deployedUsd24h ?? 0;
+      const roomUsd = Math.max(0, cfg.dailyDeployCap.maxUsd - used);
+      if (roomUsd < sell * i.usdPerXaut) {
+        if (roomUsd < cfg.minTradeUsd) {
+          return {
+            deposits,
+            heldBackXaut: heldBack,
+            clearStranded,
+            action: { kind: "none", why: `daily deployment cap reached ($${used.toFixed(0)} of $${cfg.dailyDeployCap.maxUsd} into BTC in the last 24h); the rest follows as the window rolls` },
+            notes,
+          };
+        }
+        sell = roomUsd / i.usdPerXaut;
+        why = ` (daily deployment cap $${cfg.dailyDeployCap.maxUsd})`;
+      }
+    }
     if (sell * i.usdPerXaut >= cfg.minTradeUsd) action = { kind: "to_btc", xaut: sell };
     else action = { kind: "none", why: heldBack > 0 ? `holding BTC; ${heldBack.toFixed(4)} XAUT held back by the new-money cap` : `holding BTC${why}; nothing to convert` };
   } else {
@@ -251,6 +270,7 @@ export async function runTick(d: { ex: Exchange; store: Store; now?: number; pol
       usdPerBtc: btcUst.last,
       desiredBtc: a.desiredBtc,
       dist: a.last.dist,
+      deployedUsd24h: store.deployedUsdSince(now - 86_400_000),
     });
 
     for (const dep of plan.deposits) {

@@ -4,6 +4,7 @@ import { analyze, runTick, tradesFor, walletView, type TickResult } from "./engi
 import { BTC_UST, XAUT_BTC, XAUT_UST } from "./execute.js";
 import { hasSecrets, readSecrets } from "./secrets.js";
 import { Store, type DepositRow, type SnapshotRow } from "./store.js";
+import { attachActual, buildExecutions } from "./timeline.js";
 import { CANDLE_LIMIT } from "./engine.js";
 
 /**
@@ -91,7 +92,9 @@ export class XautService {
       }
     }
 
-    const trades = analysis ? tradesFor(analysis) : [];
+    const allFills = this.store.allFills();
+    const trades = analysis ? attachActual(tradesFor(analysis), allFills, price ? 1 / price : null) : [];
+    const actualClosed = trades.filter((t) => t.status === "closed" && t.actual?.pnlXaut != null);
     const compound = (xs: Array<number | null>) => (xs.reduce<number>((m, x) => (x === null ? m : m * (1 + x / 100)), 1) - 1) * 100;
     const snaps = this.store.snapshots(2000);
     const deposits = this.store.deposits(500);
@@ -140,14 +143,19 @@ export class XautService {
       },
       bars: analysis ? analysis.bars.slice(-180) : [],
       signals: analysis ? analysis.signals.filter((s) => s.signalBarTime >= (analysis!.bars[Math.max(0, analysis!.bars.length - 180)]?.time ?? 0)) : [],
-      trades: [...trades].reverse(),
+      trades,
+      executions: buildExecutions(allFills).slice(0, 60),
       summary: {
         trades: trades.length,
         closed: trades.filter((t) => t.status === "closed").length,
         wins: trades.filter((t) => t.status === "closed" && (t.xautReturnPct ?? 0) > 0).length,
         signalXautReturnPct: trades.length ? compound(trades.map((t) => t.xautReturnPct)) : 0,
         accountXautReturnPct: twrXautPct(snaps, deposits),
+        actualClosed: actualClosed.length,
+        actualWins: actualClosed.filter((t) => (t.actual?.pnlXaut ?? 0) > 0).length,
+        actualNetPnlXaut: trades.reduce((s, t) => s + (t.actual?.pnlXaut ?? 0), 0),
       },
+      deployed24hUsd: this.store.deployedUsdSince(Date.now() - 86_400_000),
       tickMs: Number(process.env.XAUT_TICK_MS ?? 60_000),
       snapshots: snaps.filter((_, i) => i % Math.max(1, Math.ceil(snaps.length / 400)) === 0 || i === snaps.length - 1),
       events: this.store.events(80),
