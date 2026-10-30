@@ -17,6 +17,7 @@ function Settings({ s, reload }: { s: StatusDto; reload: () => Promise<void> }) 
   const [chunk, setChunk] = useState(String(c.chunkUsd));
   const [minTrade, setMinTrade] = useState(String(c.minTradeUsd));
   const [posCap, setPosCap] = useState(String(c.positionCapXaut));
+  const [reserve, setReserve] = useState(String(c.usdtReserve ?? 0));
   const [sEn, setSEn] = useState(c.strategyCap.enabled);
   const [sPct, setSPct] = useState(String(c.strategyCap.maxDistPct));
   const [nEn, setNEn] = useState(c.newMoneyCap.enabled);
@@ -31,6 +32,7 @@ function Settings({ s, reload }: { s: StatusDto; reload: () => Promise<void> }) 
       chunkUsd: Number(chunk),
       minTradeUsd: Number(minTrade),
       positionCapXaut: Number(posCap),
+      usdtReserve: Number(reserve),
       strategyCap: { enabled: sEn, maxDistPct: Number(sPct) },
       newMoneyCap: { enabled: nEn, maxDistPct: Number(nPct), minLumpPct: Number(nLump) },
     };
@@ -47,6 +49,16 @@ function Settings({ s, reload }: { s: StatusDto; reload: () => Promise<void> }) 
           <NumField label="Order size" value={chunk} onChange={setChunk} suffix="USD per order (one order open at a time)" />
           <NumField label="Ignore below" value={minTrade} onChange={setMinTrade} suffix="USD" />
           <NumField label="Position cap" value={posCap} onChange={setPosCap} suffix="XAUT in BTC at once (0 = none)" />
+        </div>
+
+        <div className="border border-slate-800 rounded p-3 space-y-2">
+          <div className="text-xs uppercase tracking-wider text-slate-400">USDT reserve (park cash)</div>
+          <div className="flex flex-wrap items-center gap-4">
+            <NumField label="Keep" value={reserve} onChange={setReserve} suffix="USDT parked in the wallet (0 = off)" />
+          </div>
+          <p className="text-xs text-slate-500">
+            When the wallet holds less USDT than this, the bot sells whatever it holds (the asset the strategy is not after first, then the rest) into USDT, in order-size chunks, one order at a time, until the reserve is reached. The parked USDT stays out of the strategy and still counts in account value. Set it back to 0 and the USDT is put back to work in whatever the strategy wants.
+          </p>
         </div>
 
         <div className="border border-slate-800 rounded p-3 space-y-2">

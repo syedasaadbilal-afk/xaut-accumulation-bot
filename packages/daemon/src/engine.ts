@@ -1,6 +1,6 @@
 import type { Exchange, WalletBalance } from "./bitfinex.js";
 import type { BotConfig, BotState } from "./config.js";
-import { BTC_UST, XAUT_BTC, XAUT_UST, rotate, sweepUst } from "./execute.js";
+import { BTC_UST, XAUT_BTC, XAUT_UST, raiseUst, rotate, sweepUst } from "./execute.js";
 import {
   RELIABLE_BARS,
   buildTrades,
@@ -74,6 +74,11 @@ export function walletView(w: WalletBalance[]): WalletView {
   };
 }
 
+/** USDT that counts as part of the account value: the parked reserve plus leftovers of the bot's own rotations. */
+export function parkedUst(w: { ustAvail: number }, cfg: { usdtReserve: number }, strandedUst: number): number {
+  return Math.min(w.ustAvail, Math.max(0, cfg.usdtReserve) + Math.max(0, strandedUst));
+}
+
 export interface PlanInput {
   cfg: BotConfig;
   state: BotState;
@@ -97,7 +102,8 @@ export interface DepositFound {
 
 export type PlannedAction =
   | { kind: "none"; why: string }
-  | { kind: "sweep"; into: "btc" | "xaut"; ust: number }
+  | { kind: "sweep"; into: "btc" | "xaut"; ust: number; idle?: boolean }
+  | { kind: "raise_usdt"; from: "btc" | "xaut"; usd: number; base: number }
   | { kind: "to_btc"; xaut: number }
   | { kind: "to_xaut"; btc: number };
 
@@ -170,12 +176,13 @@ export function planTick(i: PlanInput): Plan {
   // 3. Decide the next action.
   let action: PlannedAction;
   let clearStranded = false;
-  // Idle USDT: leftovers from earlier rotations (tracked as stranded) or anything else sitting in the
-  // bot's wallet. The account is bot-only, so it is put to work in whatever the strategy wants.
-  const idleUst = w.ustAvail * 0.999;
+  // USDT handling. The reserve is USDT the user wants parked; anything above it is idle and
+  // is put to work in whatever the strategy wants (the account is bot-only).
+  const reserve = Math.max(0, cfg.usdtReserve);
   const sweepMin = Math.max(cfg.minTradeUsd, 5);
+  const excessUst = Math.max(0, w.ustAvail * 0.999 - reserve);
   if (state.strandedUst >= cfg.minTradeUsd) {
-    const ust = Math.min(state.strandedUst, idleUst);
+    const ust = Math.min(state.strandedUst, excessUst);
     if (ust >= 1) {
       action = { kind: "sweep", into: desiredBtc ? "btc" : "xaut", ust };
       return { deposits, heldBackXaut: heldBack, clearStranded, action, notes };
@@ -185,14 +192,30 @@ export function planTick(i: PlanInput): Plan {
   } else if (state.strandedUst > 0) {
     clearStranded = true; // dust
   }
-  if (idleUst >= sweepMin) {
-    let ust = idleUst;
+  // 3a. Reserve short: sell the position into USDT (the asset the strategy is not after first).
+  const shortfall = reserve - w.ustAvail;
+  if (reserve > 0 && shortfall >= sweepMin) {
+    const xautFree = Math.max(0, w.xautAvail - heldBack);
+    const order: Array<"btc" | "xaut"> = desiredBtc ? ["xaut", "btc"] : ["btc", "xaut"];
+    for (const from of order) {
+      const base = from === "btc" ? w.btcAvail : xautFree;
+      const value = base * (from === "btc" ? i.usdPerBtc : i.usdPerXaut);
+      if (value < cfg.minTradeUsd) continue;
+      const usd = Math.min(shortfall, value);
+      notes.push(`USDT reserve is ${reserve.toFixed(2)} but the wallet holds ${w.ustAvail.toFixed(2)}: selling ${from.toUpperCase()} into USDT`);
+      action = { kind: "raise_usdt", from, usd, base };
+      return { deposits, heldBackXaut: heldBack, clearStranded, action, notes };
+    }
+  }
+  // 3b. USDT above the reserve is idle: swept into the desired asset (position cap respected).
+  if (excessUst >= sweepMin) {
+    let ust = excessUst;
     if (desiredBtc && cfg.positionCapXaut > 0) {
       const room = Math.max(0, cfg.positionCapXaut - w.btc / price);
       ust = Math.min(ust, room * i.usdPerXaut);
     }
     if (ust >= sweepMin) {
-      action = { kind: "sweep", into: desiredBtc ? "btc" : "xaut", ust };
+      action = { kind: "sweep", into: desiredBtc ? "btc" : "xaut", ust, idle: true };
       notes.push(`${ust.toFixed(2)} USDT sitting idle in the wallet: swept into ${desiredBtc ? "BTC" : "XAUT"}`);
       return { deposits, heldBackXaut: heldBack, clearStranded, action, notes };
     }
@@ -220,7 +243,7 @@ export function planTick(i: PlanInput): Plan {
 // ---------------------------------------------------------------- tick
 
 export interface TickResult {
-  action: "disabled" | "idle" | "would_to_btc" | "would_to_xaut" | "would_sweep" | "rotated" | "swept" | "blocked" | "error";
+  action: "disabled" | "idle" | "would_to_btc" | "would_to_xaut" | "would_sweep" | "would_raise_usdt" | "rotated" | "raised" | "swept" | "blocked" | "error";
   detail: string;
 }
 
@@ -277,7 +300,7 @@ export async function runTick(d: { ex: Exchange; store: Store; now?: number; pol
     for (const n of plan.notes) store.addEvent("info", n, undefined, now);
     state = { ...state, heldBackXaut: plan.heldBackXaut, ...(plan.clearStranded ? { strandedUst: 0 } : {}) };
 
-    const equityXaut = wallets.xaut + wallets.btc / price + state.strandedUst / xautUst.last;
+    const equityXaut = wallets.xaut + wallets.btc / price + parkedUst(wallets, cfg, state.strandedUst) / xautUst.last;
     store.addSnapshot({ ts: now, xaut: wallets.xaut, btc: wallets.btc, price, equityXaut });
     const baseline = { xaut: wallets.xaut, btc: wallets.btc, at: now };
 
@@ -297,7 +320,9 @@ export async function runTick(d: { ex: Exchange; store: Store; now?: number; pol
         ? `${fx(act.xaut, 6)} XAUT -> BTC`
         : act.kind === "to_xaut"
           ? `${fx(act.btc, 8)} BTC -> XAUT`
-          : `${fx(act.ust, 2)} USDT -> ${act.into.toUpperCase()}`;
+          : act.kind === "raise_usdt"
+            ? `${fx(act.usd, 2)} USDT from ${act.from.toUpperCase()} (USDT reserve)`
+            : `${fx(act.ust, 2)} USDT -> ${act.into.toUpperCase()}`;
 
     if (cfg.mode !== "LIVE" || ex.runMode !== "LIVE") {
       state = { ...state, snapshot: baseline };
@@ -306,12 +331,13 @@ export async function runTick(d: { ex: Exchange; store: Store; now?: number; pol
         store.addEvent("would", `[DRY_RUN] would convert ${describe}`, { regime: a.last.regime, dist: a.last.dist }, now);
         state = { ...state, lastWouldKey: key };
       }
-      const kind = act.kind === "to_btc" ? "would_to_btc" : act.kind === "to_xaut" ? "would_to_xaut" : "would_sweep";
+      const kind = act.kind === "to_btc" ? "would_to_btc" : act.kind === "to_xaut" ? "would_to_xaut" : act.kind === "raise_usdt" ? "would_raise_usdt" : "would_sweep";
       return finish({ action: kind, detail: `[DRY_RUN] would convert ${describe}` });
     }
 
     // ---- LIVE ----
-    const rotationId = String(now);
+    // Reserve moves and idle-USDT sweeps are tagged "usdt:" so they never pose as trade entries/exits.
+    const rotationId = act.kind === "raise_usdt" || (act.kind === "sweep" && act.idle) ? `usdt:${now}` : String(now);
     const onFill = (f: { symbol: string; side: "buy" | "sell"; base: number; price: number }) =>
       store.addFill({ ts: Date.now(), rotationId, symbol: f.symbol, side: f.side, base: f.base, price: f.price });
     store.addEvent("rotation_start", `Converting ${describe}`, { regime: a.last.regime, dist: a.last.dist }, now);
@@ -320,7 +346,13 @@ export async function runTick(d: { ex: Exchange; store: Store; now?: number; pol
     let summary: string;
     let interrupted: string | null;
     let kind: TickResult["action"];
-    if (act.kind === "sweep") {
+    if (act.kind === "raise_usdt") {
+      const r = await raiseUst({ ex, from: act.from, usd: act.usd, maxBase: act.base, chunkUsd: cfg.chunkUsd, onFill, ...(d.pollMs !== undefined ? { pollMs: d.pollMs } : {}) });
+      stranded = state.strandedUst;
+      summary = `Raised ${fx(r.proceeds, 2)} USDT by selling ${fx(r.sold, act.from === "btc" ? 8 : 6)} ${act.from.toUpperCase()}`;
+      interrupted = r.interrupted;
+      kind = "raised";
+    } else if (act.kind === "sweep") {
       const r = await sweepUst({ ex, into: act.into, ust: act.ust, chunkUsd: cfg.chunkUsd, onFill, ...(d.pollMs !== undefined ? { pollMs: d.pollMs } : {}) });
       stranded = r.strandedUst;
       summary = `Swept ${fx(r.spentUst, 2)} USDT into ${act.into.toUpperCase()} (${fx(r.bought, act.into === "btc" ? 8 : 6)} bought)`;
@@ -341,7 +373,7 @@ export async function runTick(d: { ex: Exchange; store: Store; now?: number; pol
       interrupted = r.interrupted;
       kind = "rotated";
     }
-    state = { ...state, strandedUst: stranded, lastWouldKey: null };
+    state = { ...state, strandedUst: act.kind === "sweep" && act.idle ? state.strandedUst : stranded, lastWouldKey: null };
     store.addEvent(interrupted ? "rotation_partial" : "rotation_done", interrupted ? `${summary} - stopped: ${interrupted}` : summary, { stranded }, Date.now());
 
     // New baseline = wallets after our own trades, so they are never mistaken for deposits.

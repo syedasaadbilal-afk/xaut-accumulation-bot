@@ -222,3 +222,56 @@ export async function sweepUst(p: {
   const stranded = left > Math.max(2, p.ust * DUST_FRACTION) ? left : 0;
   return { bought, spentUst: p.ust - left, strandedUst: stranded, interrupted };
 }
+
+/**
+ * Sells part of one asset for USDT (to build the USDT reserve), in USD-sized limit orders,
+ * one at a time. Stops once `usd` is raised, `maxBase` is used up, or an order fails. Never throws.
+ */
+export async function raiseUst(p: {
+  ex: Exchange;
+  from: "btc" | "xaut";
+  /** USDT to raise. */
+  usd: number;
+  /** Most of the asset that may be sold. */
+  maxBase: number;
+  chunkUsd: number;
+  fillTimeoutMs?: number;
+  pollMs?: number;
+  onFill?: (f: FillRecord) => void;
+  log?: (m: string) => void;
+}): Promise<{ sold: number; proceeds: number; interrupted: string | null }> {
+  const log = p.log ?? ((m: string) => console.log(`[xaut] ${m}`));
+  const sym = p.from === "btc" ? BTC_UST : XAUT_UST;
+  let left = p.usd;
+  let baseLeft = p.maxBase;
+  let sold = 0;
+  let proceeds = 0;
+  let interrupted: string | null = null;
+  try {
+    const min = await p.ex.getMinOrderSize(sym);
+    for (let i = 0; i < 200 && left >= 2 && baseLeft > 0; i++) {
+      const t = await p.ex.getTicker(sym);
+      if (!(t.bid > 0)) {
+        interrupted = `no bid on ${sym}`;
+        break;
+      }
+      const base = floor8(Math.min(baseLeft, Math.min(left, p.chunkUsd) / t.bid));
+      if (base <= 0 || base < min || base * t.bid < 1) break;
+      const r = await placeLimitAndWait(p.ex, sym, "sell", base, t.bid * (1 - LIMIT_BUFFER), p.fillTimeoutMs ?? 5 * 60_000, p.pollMs ?? 4_000, log);
+      if (r.filled > 0) {
+        sold += r.filled;
+        baseLeft -= r.filled;
+        proceeds += r.filled * r.avgPrice;
+        left -= r.filled * r.avgPrice;
+        p.onFill?.({ symbol: sym, side: "sell", base: r.filled, price: r.avgPrice });
+      }
+      if (r.filled < base * 0.999) {
+        interrupted = r.error ? `sell failed: ${r.error}` : r.filled > 0 ? "sell order only partly filled" : "sell order did not fill";
+        break;
+      }
+    }
+  } catch (err) {
+    interrupted = err instanceof Error ? err.message : String(err);
+  }
+  return { sold, proceeds, interrupted };
+}

@@ -1,6 +1,6 @@
 import type { DatabaseSyncLike } from "./db/types.js";
 import { BitfinexExchange, type Exchange } from "./bitfinex.js";
-import { analyze, runTick, tradesFor, walletView, type TickResult } from "./engine.js";
+import { analyze, parkedUst, runTick, tradesFor, walletView, type TickResult } from "./engine.js";
 import { BTC_UST, XAUT_BTC, XAUT_UST } from "./execute.js";
 import { hasSecrets, readSecrets } from "./secrets.js";
 import { Store, type DepositRow, type SnapshotRow } from "./store.js";
@@ -108,7 +108,7 @@ export class XautService {
         ? (() => {
             const btcX = wallets.btc / price;
             const total = wallets.xaut + btcX;
-            if (total <= 0) return "EMPTY";
+            if (total <= 0) return wallets.ustAvail > 1 ? "USDT" : "EMPTY";
             return btcX / total > 0.9 ? "BTC" : wallets.xaut / total > 0.9 ? "XAUT" : "MIXED";
           })()
         : null;
@@ -123,7 +123,7 @@ export class XautService {
       usdPerBtc,
       wallets,
       walletRows,
-      equityXaut: wallets && price ? wallets.xaut + wallets.btc / price : null,
+      equityXaut: wallets && price && usdPerXaut ? wallets.xaut + wallets.btc / price + parkedUst(wallets, cfg, state.strandedUst) / usdPerXaut : null,
       holding,
       desired: analysis ? (analysis.desiredBtc ? "BTC" : "XAUT") : null,
       desiredUncapped: analysis ? (analysis.desiredBtcUncapped ? "BTC" : "XAUT") : null,

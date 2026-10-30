@@ -4,12 +4,13 @@ import { cagrPct, card, fmtDate, fmtPct, fmtTs, h3, num, pctCls } from "../forma
 const KIND: Record<ExecutionDto["kind"], string> = {
   to_btc: "Entry (XAUT → BTC)",
   to_xaut: "Exit (BTC → XAUT)",
+  to_usdt: "Park (position → USDT reserve)",
   sweep_btc: "Sweep (USDT → BTC)",
   sweep_xaut: "Sweep (USDT → XAUT)",
 };
 
 function amt(asset: string | null, v: number): string {
-  return asset === null ? "-" : `${v.toFixed(asset === "BTC" ? 6 : 4)} ${asset}`;
+  return asset === null ? "-" : `${v.toFixed(asset === "BTC" ? 6 : asset === "USDT" ? 2 : 4)} ${asset}`;
 }
 
 function Executions({ rows }: { rows: ExecutionDto[] }) {

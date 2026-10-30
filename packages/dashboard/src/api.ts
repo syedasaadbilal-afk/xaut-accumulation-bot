@@ -6,6 +6,7 @@ export interface BotConfigDto {
   chunkUsd: number;
   minTradeUsd: number;
   positionCapXaut: number;
+  usdtReserve: number;
   strategyCap: { enabled: boolean; maxDistPct: number };
   newMoneyCap: { enabled: boolean; maxDistPct: number; minLumpPct: number };
 }
@@ -43,10 +44,10 @@ export interface TradeDto {
 export interface ExecutionDto {
   rotationId: string;
   ts: number;
-  kind: "to_btc" | "to_xaut" | "sweep_btc" | "sweep_xaut";
+  kind: "to_btc" | "to_xaut" | "to_usdt" | "sweep_btc" | "sweep_xaut";
   soldAsset: "XAUT" | "BTC" | null;
   sold: number;
-  boughtAsset: "XAUT" | "BTC";
+  boughtAsset: "XAUT" | "BTC" | "USDT";
   bought: number;
   xautUsd: number | null;
   btcUsd: number | null;

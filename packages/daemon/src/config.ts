@@ -26,6 +26,8 @@ export interface BotConfig {
   minTradeUsd: number;
   /** Max XAUT-equivalent allowed to sit in BTC at once. 0 = no limit. */
   positionCapXaut: number;
+  /** USDT to keep parked in the wallet. The bot sells its position (stray asset first) to reach it; 0 = off. */
+  usdtReserve: number;
   strategyCap: { enabled: boolean; maxDistPct: number };
   newMoneyCap: { enabled: boolean; maxDistPct: number; minLumpPct: number };
 }
@@ -36,6 +38,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   chunkUsd: 2000,
   minTradeUsd: 25,
   positionCapXaut: 0,
+  usdtReserve: 0,
   strategyCap: { enabled: false, maxDistPct: 5 },
   newMoneyCap: { enabled: false, maxDistPct: 5, minLumpPct: 0 },
 };
@@ -73,6 +76,8 @@ export function parseConfig(b: unknown): { config: BotConfig } | { error: string
   if (!isNum(x.chunkUsd) || x.chunkUsd < 10 || x.chunkUsd > 1_000_000) return { error: "chunkUsd must be between 10 and 1,000,000" };
   if (!isNum(x.minTradeUsd) || x.minTradeUsd < 1 || x.minTradeUsd > 100_000) return { error: "minTradeUsd must be between 1 and 100,000" };
   if (!isNum(x.positionCapXaut) || x.positionCapXaut < 0) return { error: "positionCapXaut must be 0 (no limit) or more" };
+  const reserve = x.usdtReserve === undefined ? 0 : x.usdtReserve;
+  if (!isNum(reserve) || reserve < 0 || reserve > 100_000_000) return { error: "usdtReserve must be 0 (off) or more" };
   const s = x.strategyCap;
   if (!s || typeof s.enabled !== "boolean" || !isNum(s.maxDistPct) || s.maxDistPct <= 0 || s.maxDistPct > 100) {
     return { error: "strategyCap needs enabled and maxDistPct in (0, 100]" };
@@ -88,6 +93,7 @@ export function parseConfig(b: unknown): { config: BotConfig } | { error: string
       chunkUsd: x.chunkUsd,
       minTradeUsd: x.minTradeUsd,
       positionCapXaut: x.positionCapXaut,
+      usdtReserve: reserve,
       strategyCap: { enabled: s.enabled, maxDistPct: s.maxDistPct },
       newMoneyCap: { enabled: n.enabled, maxDistPct: n.maxDistPct, minLumpPct: n.minLumpPct },
     },

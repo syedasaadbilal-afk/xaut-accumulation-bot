@@ -7,11 +7,11 @@ const BTC_SYM = "tBTCUST";
 export interface Execution {
   rotationId: string;
   ts: number;
-  kind: "to_btc" | "to_xaut" | "sweep_btc" | "sweep_xaut";
+  kind: "to_btc" | "to_xaut" | "to_usdt" | "sweep_btc" | "sweep_xaut";
   /** Asset amounts that left / arrived in this rotation. */
   soldAsset: "XAUT" | "BTC" | null;
   sold: number;
-  boughtAsset: "XAUT" | "BTC";
+  boughtAsset: "XAUT" | "BTC" | "USDT";
   bought: number;
   /** Average fill prices in USDT, when that leg filled. */
   xautUsd: number | null;
@@ -56,7 +56,13 @@ export function buildExecutions(fills: FillRow[]): Execution[] {
     let sold = 0;
     let boughtAsset: Execution["boughtAsset"];
     let bought = 0;
-    if (x.sell.base > 0) {
+    if (rotationId.startsWith("usdt:") && (x.sell.base > 0 || b.sell.base > 0)) {
+      kind = "to_usdt";
+      soldAsset = x.sell.base > 0 ? "XAUT" : "BTC";
+      sold = x.sell.base > 0 ? x.sell.base : b.sell.base;
+      boughtAsset = "USDT";
+      bought = x.sell.base > 0 ? x.sell.usd : b.sell.usd;
+    } else if (x.sell.base > 0) {
       kind = "to_btc";
       soldAsset = "XAUT";
       sold = x.sell.base;
@@ -120,7 +126,9 @@ function ratioOf(btcUsd: number, btcBase: number, xautUsd: number, xautBase: num
  * XAUT sells and BTC buys between its entry and exit; its exit fills are the BTC sells and
  * XAUT buys from the exit until the next trade starts. `mark` = BTC priced in XAUT now.
  */
-export function attachActual(trades: MirrorTrade[], fills: FillRow[], mark: number | null): TradeRow[] {
+export function attachActual(trades: MirrorTrade[], allFills: FillRow[], mark: number | null): TradeRow[] {
+  // USDT-reserve sells and idle-USDT sweeps are not trade entries or exits.
+  const fills = allFills.filter((f) => !f.rotationId.startsWith("usdt:"));
   const asc = [...trades].sort((a, b) => a.entryTime - b.entryTime);
   const rows: TradeRow[] = asc.map((t, i) => {
     const entryFrom = t.entryTime * 1000;
