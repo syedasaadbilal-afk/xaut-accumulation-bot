@@ -6,7 +6,6 @@ export interface BotConfigDto {
   chunkUsd: number;
   minTradeUsd: number;
   positionCapXaut: number;
-  dailyDeployCap: { enabled: boolean; maxUsd: number };
   strategyCap: { enabled: boolean; maxDistPct: number };
   newMoneyCap: { enabled: boolean; maxDistPct: number; minLumpPct: number };
 }
@@ -83,7 +82,6 @@ export interface StatusDto {
   executions: ExecutionDto[];
   summary: { trades: number; closed: number; wins: number; signalXautReturnPct: number; accountXautReturnPct: number | null; actualClosed: number; actualWins: number; actualNetPnlXaut: number };
   tickMs: number;
-  deployed24hUsd: number;
   snapshots: Array<{ ts: number; xaut: number; btc: number; price: number; equityXaut: number }>;
   events: Array<{ id: number; ts: number; kind: string; summary: string; detail: string | null }>;
   fills: Array<{ id: number; ts: number; rotationId: string; symbol: string; side: "buy" | "sell"; base: number; price: number }>;

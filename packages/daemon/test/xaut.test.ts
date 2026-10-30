@@ -10,7 +10,7 @@ import { Store } from "../src/store.js";
 import { attachActual, buildExecutions } from "../src/timeline.js";
 import { DOWN_CLOSES, FakeExchange, UP_CLOSES, nowAfter, xautBtcPath } from "./helpers.js";
 
-const cfg = (over: Partial<BotConfig> = {}): BotConfig => ({ ...DEFAULT_CONFIG, enabled: true, mode: "LIVE", dailyDeployCap: { enabled: false, maxUsd: 2000 }, ...over });
+const cfg = (over: Partial<BotConfig> = {}): BotConfig => ({ ...DEFAULT_CONFIG, enabled: true, mode: "LIVE", ...over });
 const newStore = () => {
   const db = openDatabase(":memory:");
   applyMigrations(db);
@@ -181,59 +181,24 @@ describe("planTick", () => {
     expect(q.action).toEqual({ kind: "sweep", into: "xaut", ust: 400 });
   });
 
+  it("sweeps idle USDT in the wallet even when nothing is tracked as stranded", () => {
+    const p = planTick(baseInput({ cfg: cfg({ minTradeUsd: 1 }), wallets: { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 21.29 } }));
+    expect(p.action.kind).toBe("sweep");
+    expect((p.action as { ust: number }).ust).toBeCloseTo(21.29 * 0.999, 6);
+    const dust = planTick(baseInput({ cfg: cfg({ minTradeUsd: 1 }), wallets: { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 2 } }));
+    expect(dust.action.kind).toBe("none");
+  });
+
+  it("does not sweep idle USDT into BTC beyond the position cap", () => {
+    const c = cfg({ positionCapXaut: 5, minTradeUsd: 1 });
+    const p = planTick(baseInput({ cfg: c, wallets: { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 500 } }));
+    expect(p.action.kind).toBe("none");
+  });
+
   it("clears stranded USDT that is no longer in the wallet", () => {
     const p = planTick(baseInput({ wallets: { xaut: 10, btc: 0, xautAvail: 10, btcAvail: 0, ustAvail: 0 } }, { strandedUst: 400 }));
     expect(p.clearStranded).toBe(true);
     expect(p.action.kind).toBe("to_btc");
-  });
-});
-
-describe("daily deployment cap", () => {
-  const w = { xaut: 10, btc: 0, xautAvail: 10, btcAvail: 0, ustAvail: 0 }; // 10 XAUT = $40,000 at $4,000
-  const on = cfg({ dailyDeployCap: { enabled: true, maxUsd: 2000 } });
-
-  it("defaults to on at $2,000", () => {
-    expect(DEFAULT_CONFIG.dailyDeployCap).toEqual({ enabled: true, maxUsd: 2000 });
-  });
-
-  it("limits a big conversion into BTC to the room left in the rolling 24h", () => {
-    const p = planTick(baseInput({ cfg: on, wallets: w, deployedUsd24h: 0 }));
-    expect(p.action.kind).toBe("to_btc");
-    expect((p.action as { xaut: number }).xaut).toBeCloseTo(0.5, 9); // $2,000 / $4,000
-    const q = planTick(baseInput({ cfg: on, wallets: w, deployedUsd24h: 1200 }));
-    expect((q.action as { xaut: number }).xaut).toBeCloseTo(0.2, 9);
-  });
-
-  it("waits when the cap is used up, and never caps the exit back to XAUT", () => {
-    const p = planTick(baseInput({ cfg: on, wallets: w, deployedUsd24h: 2000 }));
-    expect(p.action.kind).toBe("none");
-    expect((p.action as { why: string }).why).toMatch(/daily deployment cap/);
-    const exit = planTick(baseInput({ cfg: on, desiredBtc: false, wallets: { xaut: 0, btc: 5, xautAvail: 0, btcAvail: 5, ustAvail: 0 }, deployedUsd24h: 99999 }));
-    expect(exit.action).toEqual({ kind: "to_xaut", btc: 5 });
-  });
-
-  it("is ignored when switched off", () => {
-    expect(planTick(baseInput({ cfg: cfg(), wallets: w, deployedUsd24h: 99999 })).action).toEqual({ kind: "to_btc", xaut: 10 });
-  });
-
-  it("runTick drip-feeds: first tick moves ~$2,000, the next tick (cap used) moves nothing", async () => {
-    const store = newStore();
-    store.setConfig({ ...on, chunkUsd: 500 });
-    const ex = new FakeExchange({ closes: UP_CLOSES, xaut: 10 });
-    const NOW = nowAfter(UP_CLOSES.length);
-    const r1 = await runTick({ ex, store, now: NOW, pollMs: 0 });
-    expect(r1.action).toBe("rotated");
-    expect(ex.wallets["XAUT"]).toBeGreaterThan(9.4);
-    expect(ex.wallets["XAUT"]).toBeLessThan(9.6);
-    expect(store.deployedUsdSince(0)).toBeGreaterThan(1900);
-    const r2 = await runTick({ ex, store, now: NOW + 60_000, pollMs: 0 });
-    expect(r2.action).toBe("idle");
-    expect(r2.detail).toMatch(/daily deployment cap/);
-  });
-
-  it("validates the setting", () => {
-    expect("error" in parseConfig({ ...DEFAULT_CONFIG, dailyDeployCap: { enabled: true, maxUsd: 0 } })).toBe(true);
-    expect("config" in parseConfig({ ...DEFAULT_CONFIG, dailyDeployCap: { enabled: false, maxUsd: 5000 } })).toBe(true);
   });
 });
 

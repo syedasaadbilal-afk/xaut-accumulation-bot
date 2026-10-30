@@ -6,8 +6,8 @@ export const XAUT_BTC = "tXAUT:BTC";
 
 /** How far through the book a "marketable" limit order reaches. */
 const LIMIT_BUFFER = 0.005;
-/** Fee allowance when estimating USDT proceeds of a sell. */
-const FEE_ALLOWANCE = 0.0025;
+/** Safety margin when estimating USDT proceeds of a sell. Bitfinex spot trading fees are currently zero (maker and taker). */
+const FEE_ALLOWANCE = 0.0005;
 /** Unspent USDT below this share of a chunk's proceeds is rounding dust, not a failed buy leg. */
 const DUST_FRACTION = 0.015;
 

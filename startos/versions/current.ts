@@ -1,9 +1,9 @@
 import { IMPOSSIBLE, VersionInfo } from '@start9labs/start-sdk'
 export const current = VersionInfo.of({
-  version: '0.1.3:0',
+  version: '0.1.5:0',
   releaseNotes: {
     en_US:
-      'Config shows every wallet the API key can see (for finding missing balances). Timeline now matches the BTC Yield Autopilot: an executions table built from real order fills, and a TradingView-style trades table that shows the actual fill price next to the signal price, with net PnL in XAUT, return, win rate and closed trades.',
+      'Loads the full daily candle history (cached 2 min) so the trade history matches TradingView exactly. Idle USDT sitting in the wallet is now swept into whatever the strategy wants (respecting the position cap). Timeline and Status now show cumulative return and CAGR for the chart signals.',
   },
   migrations: { up: async ({ effects }) => {}, down: IMPOSSIBLE },
 })

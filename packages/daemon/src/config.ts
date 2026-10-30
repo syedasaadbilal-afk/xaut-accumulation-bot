@@ -26,11 +26,6 @@ export interface BotConfig {
   minTradeUsd: number;
   /** Max XAUT-equivalent allowed to sit in BTC at once. 0 = no limit. */
   positionCapXaut: number;
-  /**
-   * Rolling-24h cap (USD) on money moved INTO BTC (the risk-on leg), so a big deposit or a first
-   * deployment is drip-fed instead of hitting the book at once. Exits back to XAUT are never capped.
-   */
-  dailyDeployCap: { enabled: boolean; maxUsd: number };
   strategyCap: { enabled: boolean; maxDistPct: number };
   newMoneyCap: { enabled: boolean; maxDistPct: number; minLumpPct: number };
 }
@@ -38,10 +33,9 @@ export interface BotConfig {
 export const DEFAULT_CONFIG: BotConfig = {
   enabled: false,
   mode: "DRY_RUN",
-  chunkUsd: 1000,
+  chunkUsd: 2000,
   minTradeUsd: 25,
   positionCapXaut: 0,
-  dailyDeployCap: { enabled: true, maxUsd: 2000 },
   strategyCap: { enabled: false, maxDistPct: 5 },
   newMoneyCap: { enabled: false, maxDistPct: 5, minLumpPct: 0 },
 };
@@ -79,10 +73,6 @@ export function parseConfig(b: unknown): { config: BotConfig } | { error: string
   if (!isNum(x.chunkUsd) || x.chunkUsd < 10 || x.chunkUsd > 1_000_000) return { error: "chunkUsd must be between 10 and 1,000,000" };
   if (!isNum(x.minTradeUsd) || x.minTradeUsd < 1 || x.minTradeUsd > 100_000) return { error: "minTradeUsd must be between 1 and 100,000" };
   if (!isNum(x.positionCapXaut) || x.positionCapXaut < 0) return { error: "positionCapXaut must be 0 (no limit) or more" };
-  const dd = x.dailyDeployCap ?? DEFAULT_CONFIG.dailyDeployCap;
-  if (typeof dd.enabled !== "boolean" || !isNum(dd.maxUsd) || dd.maxUsd < 1 || dd.maxUsd > 100_000_000) {
-    return { error: "dailyDeployCap needs enabled and maxUsd of at least 1" };
-  }
   const s = x.strategyCap;
   if (!s || typeof s.enabled !== "boolean" || !isNum(s.maxDistPct) || s.maxDistPct <= 0 || s.maxDistPct > 100) {
     return { error: "strategyCap needs enabled and maxDistPct in (0, 100]" };
@@ -98,7 +88,6 @@ export function parseConfig(b: unknown): { config: BotConfig } | { error: string
       chunkUsd: x.chunkUsd,
       minTradeUsd: x.minTradeUsd,
       positionCapXaut: x.positionCapXaut,
-      dailyDeployCap: { enabled: dd.enabled, maxUsd: dd.maxUsd },
       strategyCap: { enabled: s.enabled, maxDistPct: s.maxDistPct },
       newMoneyCap: { enabled: n.enabled, maxDistPct: n.maxDistPct, minLumpPct: n.minLumpPct },
     },

@@ -1,5 +1,5 @@
 import type { ExecutionDto, StatusDto, TradeDto } from "../api.js";
-import { card, fmtDate, fmtPct, fmtTs, h3, num, pctCls } from "../format.js";
+import { cagrPct, card, fmtDate, fmtPct, fmtTs, h3, num, pctCls } from "../format.js";
 
 const KIND: Record<ExecutionDto["kind"], string> = {
   to_btc: "Entry (XAUT → BTC)",
@@ -116,7 +116,14 @@ export function TimelineTab({ status }: { status: StatusDto | undefined }) {
             Net PnL: <span className={pctCls(sm.actualNetPnlXaut)}>{sm.actualClosed > 0 || sm.actualNetPnlXaut !== 0 ? `${sm.actualNetPnlXaut >= 0 ? "+" : ""}${sm.actualNetPnlXaut.toFixed(4)} XAUT` : "-"}</span>
           </span>
           <span>
-            Chart signals: <span className="text-slate-100">{sm.closed} closed, {sm.wins} wins, {fmtPct(sm.signalXautReturnPct)} compounded</span>
+            Chart signals: <span className="text-slate-100">{sm.closed} closed, {sm.wins} wins</span>
+          </span>
+          <span>
+            Cumulative: <span className={pctCls(sm.signalXautReturnPct)}>{fmtPct(sm.signalXautReturnPct)}</span>
+          </span>
+          <span>
+            CAGR: <span className={pctCls(cagrPct(sm.signalXautReturnPct, s.trades[s.trades.length - 1]?.entryTime ?? null))}>{fmtPct(cagrPct(sm.signalXautReturnPct, s.trades[s.trades.length - 1]?.entryTime ?? null))}</span>
+            <span className="text-slate-500"> /yr since {fmtDate(s.trades[s.trades.length - 1]?.entryTime ?? null)}</span>
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -147,7 +154,7 @@ export function TimelineTab({ status }: { status: StatusDto | undefined }) {
           </table>
         </div>
         <p className="text-xs text-slate-500 mt-2">
-          Price = what the bot actually got (average of the real fills, XAUT per BTC); "signal" = the chart's next-open price. Trades the bot did not execute (before it started) show "signal prices only". Net PnL is in XAUT, before fees, and open trades are marked to the current price.
+          Price = what the bot actually got (average of the real fills, XAUT per BTC); "signal" = the chart's next-open price. Trades the bot did not execute (before it started) show "signal prices only". Bitfinex spot trading fees are zero, so the gap between actual and signal is spread and slippage. Net PnL is in XAUT and open trades are marked to the current price.
         </p>
       </div>
 

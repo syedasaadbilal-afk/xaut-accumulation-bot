@@ -12,7 +12,8 @@ import {
 } from "./larsson.js";
 import type { Store } from "./store.js";
 
-export const CANDLE_LIMIT = 1000;
+/** Full history so the Larsson lines converge exactly like TradingView (Bitfinex allows up to 10,000). */
+export const CANDLE_LIMIT = 5000;
 
 // ---------------------------------------------------------------- analysis
 
@@ -84,8 +85,6 @@ export interface PlanInput {
   desiredBtc: boolean;
   /** Distance of BTC (in XAUT) above its Larsson baseline, as a fraction; null while warming up. */
   dist: number | null;
-  /** USD already deployed into BTC in the last 24h (for the daily deployment cap). */
-  deployedUsd24h?: number;
 }
 
 export interface DepositFound {
@@ -171,8 +170,12 @@ export function planTick(i: PlanInput): Plan {
   // 3. Decide the next action.
   let action: PlannedAction;
   let clearStranded = false;
-  if (state.strandedUst * 1 >= cfg.minTradeUsd) {
-    const ust = Math.min(state.strandedUst, w.ustAvail * 0.999);
+  // Idle USDT: leftovers from earlier rotations (tracked as stranded) or anything else sitting in the
+  // bot's wallet. The account is bot-only, so it is put to work in whatever the strategy wants.
+  const idleUst = w.ustAvail * 0.999;
+  const sweepMin = Math.max(cfg.minTradeUsd, 5);
+  if (state.strandedUst >= cfg.minTradeUsd) {
+    const ust = Math.min(state.strandedUst, idleUst);
     if (ust >= 1) {
       action = { kind: "sweep", into: desiredBtc ? "btc" : "xaut", ust };
       return { deposits, heldBackXaut: heldBack, clearStranded, action, notes };
@@ -181,6 +184,18 @@ export function planTick(i: PlanInput): Plan {
     notes.push("stranded USDT is no longer in the wallet: cleared");
   } else if (state.strandedUst > 0) {
     clearStranded = true; // dust
+  }
+  if (idleUst >= sweepMin) {
+    let ust = idleUst;
+    if (desiredBtc && cfg.positionCapXaut > 0) {
+      const room = Math.max(0, cfg.positionCapXaut - w.btc / price);
+      ust = Math.min(ust, room * i.usdPerXaut);
+    }
+    if (ust >= sweepMin) {
+      action = { kind: "sweep", into: desiredBtc ? "btc" : "xaut", ust };
+      notes.push(`${ust.toFixed(2)} USDT sitting idle in the wallet: swept into ${desiredBtc ? "BTC" : "XAUT"}`);
+      return { deposits, heldBackXaut: heldBack, clearStranded, action, notes };
+    }
   }
 
   if (desiredBtc) {
@@ -191,23 +206,6 @@ export function planTick(i: PlanInput): Plan {
       if (room < sell) {
         sell = room;
         why = ` (position cap ${cfg.positionCapXaut} XAUT)`;
-      }
-    }
-    if (cfg.dailyDeployCap.enabled && sell * i.usdPerXaut >= cfg.minTradeUsd) {
-      const used = i.deployedUsd24h ?? 0;
-      const roomUsd = Math.max(0, cfg.dailyDeployCap.maxUsd - used);
-      if (roomUsd < sell * i.usdPerXaut) {
-        if (roomUsd < cfg.minTradeUsd) {
-          return {
-            deposits,
-            heldBackXaut: heldBack,
-            clearStranded,
-            action: { kind: "none", why: `daily deployment cap reached ($${used.toFixed(0)} of $${cfg.dailyDeployCap.maxUsd} into BTC in the last 24h); the rest follows as the window rolls` },
-            notes,
-          };
-        }
-        sell = roomUsd / i.usdPerXaut;
-        why = ` (daily deployment cap $${cfg.dailyDeployCap.maxUsd})`;
       }
     }
     if (sell * i.usdPerXaut >= cfg.minTradeUsd) action = { kind: "to_btc", xaut: sell };
@@ -270,7 +268,6 @@ export async function runTick(d: { ex: Exchange; store: Store; now?: number; pol
       usdPerBtc: btcUst.last,
       desiredBtc: a.desiredBtc,
       dist: a.last.dist,
-      deployedUsd24h: store.deployedUsdSince(now - 86_400_000),
     });
 
     for (const dep of plan.deposits) {

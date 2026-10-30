@@ -159,7 +159,6 @@ export class XautService {
         actualWins: actualClosed.filter((t) => (t.actual?.pnlXaut ?? 0) > 0).length,
         actualNetPnlXaut: trades.reduce((s, t) => s + (t.actual?.pnlXaut ?? 0), 0),
       },
-      deployed24hUsd: this.store.deployedUsdSince(Date.now() - 86_400_000),
       tickMs: Number(process.env.XAUT_TICK_MS ?? 60_000),
       snapshots: snaps.filter((_, i) => i % Math.max(1, Math.ceil(snaps.length / 400)) === 0 || i === snaps.length - 1),
       events: this.store.events(80),

@@ -1,5 +1,5 @@
 import type { StatusDto } from "../api.js";
-import { btnCls, card, formatAmount, formatCountdown, fmtPct, num, pctCls, type DisplayUnit } from "../format.js";
+import { btnCls, cagrPct, card, formatAmount, formatCountdown, fmtPct, num, pctCls, type DisplayUnit } from "../format.js";
 import { LarssonChart } from "./LarssonChart.js";
 import { LineChart } from "./LineChart.js";
 import { MetricTile } from "./MetricTile.js";
@@ -111,9 +111,8 @@ export function StatusTab({
           sublabel={s.caps.newMoney.enabled ? (s.caps.newMoney.wouldHoldBackNow ? "a deposit would be held" : "a deposit would deploy") : undefined}
           valueColor={s.caps.newMoney.wouldHoldBackNow ? "text-amber-400" : "text-slate-100"}
         />
-        <MetricTile label="Daily deploy cap" value={s.config.dailyDeployCap.enabled ? `$${s.config.dailyDeployCap.maxUsd.toLocaleString()}` : "off"} sublabel={s.config.dailyDeployCap.enabled ? `$${s.deployed24hUsd.toFixed(0)} into BTC in last 24h` : undefined} valueColor={s.config.dailyDeployCap.enabled && s.deployed24hUsd >= s.config.dailyDeployCap.maxUsd ? "text-amber-400" : "text-slate-100"} />
         <MetricTile label="Position cap" value={s.config.positionCapXaut > 0 ? `${s.config.positionCapXaut} XAUT` : "off"} />
-        <MetricTile label="Strategy XAUT gain" value={fmtPct(s.summary.signalXautReturnPct)} valueColor={pctCls(s.summary.signalXautReturnPct)} sublabel="chart signals, compounded" />
+        <MetricTile label="Strategy XAUT gain" value={fmtPct(s.summary.signalXautReturnPct)} valueColor={pctCls(s.summary.signalXautReturnPct)} sublabel={`chart signals, cumulative · CAGR ${fmtPct(cagrPct(s.summary.signalXautReturnPct, s.trades[s.trades.length - 1]?.entryTime ?? null))}`} />
       </div>
 
       <LarssonChart bars={s.bars} signals={s.signals} />
