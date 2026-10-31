@@ -275,3 +275,93 @@ export async function raiseUst(p: {
   }
   return { sold, proceeds, interrupted };
 }
+
+/** USDT trading symbol for another coin on Bitfinex ("ETH" -> tETHUST, longer tickers use a colon). */
+export function otherSymbol(currency: string): string {
+  return currency.length <= 3 ? `t${currency}UST` : `t${currency}:UST`;
+}
+
+export const UST_USD = "tUSTUSD";
+
+/**
+ * Turns an "other" balance into USDT so the idle-USDT sweep can move it into the strategy:
+ * USD is swapped for USDT on tUSTUSD, any other coin is sold on its USDT pair.
+ * Order-size chunks, one order at a time. Never throws.
+ */
+export async function convertToUst(p: {
+  ex: Exchange;
+  currency: string;
+  amount: number;
+  chunkUsd: number;
+  fillTimeoutMs?: number;
+  pollMs?: number;
+  onFill?: (f: FillRecord) => void;
+  log?: (m: string) => void;
+}): Promise<{ spent: number; gotUst: number; interrupted: string | null }> {
+  const log = p.log ?? ((m: string) => console.log(`[xaut] ${m}`));
+  const timeout = p.fillTimeoutMs ?? 5 * 60_000;
+  const poll = p.pollMs ?? 4_000;
+  let spent = 0;
+  let gotUst = 0;
+  let interrupted: string | null = null;
+  try {
+    if (p.currency === "USD") {
+      const min = await p.ex.getMinOrderSize(UST_USD);
+      let left = p.amount;
+      for (let i = 0; i < 50 && left > 0; i++) {
+        const t = await p.ex.getTicker(UST_USD);
+        if (!(t.ask > 0)) {
+          interrupted = `no ask on ${UST_USD}`;
+          break;
+        }
+        const px = t.ask * (1 + LIMIT_BUFFER);
+        const base = floor8((Math.min(left, p.chunkUsd) * 0.9995) / px);
+        if (base <= 0 || base < min) {
+          if (spent <= 0) interrupted = `USD balance is below the minimum order (${min} USDT)`;
+          break;
+        }
+        const r = await placeLimitAndWait(p.ex, UST_USD, "buy", base, px, timeout, poll, log);
+        if (r.filled > 0) {
+          spent += r.filled * r.avgPrice;
+          gotUst += r.filled;
+          left -= r.filled * r.avgPrice;
+          p.onFill?.({ symbol: UST_USD, side: "buy", base: r.filled, price: r.avgPrice });
+        }
+        if (r.filled < base * 0.999) {
+          interrupted = r.error ? `buy failed: ${r.error}` : r.filled > 0 ? "order only partly filled" : "order did not fill";
+          break;
+        }
+      }
+    } else {
+      const sym = otherSymbol(p.currency);
+      const min = await p.ex.getMinOrderSize(sym);
+      let left = p.amount;
+      for (let i = 0; i < 50 && left > 0; i++) {
+        const t = await p.ex.getTicker(sym);
+        if (!(t.bid > 0)) {
+          interrupted = `no bid on ${sym}`;
+          break;
+        }
+        const base = floor8(Math.min(left, p.chunkUsd / t.bid));
+        if (base <= 0 || base < min || base * t.bid < 1) {
+          if (spent <= 0) interrupted = `${p.currency} balance is below the minimum order`;
+          break;
+        }
+        const r = await placeLimitAndWait(p.ex, sym, "sell", base, t.bid * (1 - LIMIT_BUFFER), timeout, poll, log);
+        if (r.filled > 0) {
+          spent += r.filled;
+          gotUst += r.filled * r.avgPrice;
+          left -= r.filled;
+          p.onFill?.({ symbol: sym, side: "sell", base: r.filled, price: r.avgPrice });
+        }
+        if (r.filled < base * 0.999) {
+          interrupted = r.error ? `sell failed: ${r.error}` : r.filled > 0 ? "order only partly filled" : "order did not fill";
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    interrupted = err instanceof Error ? err.message : String(err);
+  }
+  return { spent, gotUst, interrupted };
+}

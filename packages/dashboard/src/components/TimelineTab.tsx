@@ -6,6 +6,7 @@ const KIND: Record<ExecutionDto["kind"], string> = {
   to_xaut: "Exit (BTC → XAUT)",
   to_usdt: "Park (XAUT reserve → USDT)",
   reserve_xaut: "XAUT reserve (BTC → XAUT)",
+  convert_ust: "Convert (other balance → USDT)",
   sweep_btc: "Sweep (USDT → BTC)",
   sweep_xaut: "Sweep (USDT → XAUT)",
 };

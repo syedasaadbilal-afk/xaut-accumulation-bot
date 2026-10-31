@@ -60,6 +60,8 @@ export interface BotState {
   lastTickAt: number | null;
   /** Dedupes repeated dry-run "would convert" events. */
   lastWouldKey: string | null;
+  /** Other-currency balances the bot could not convert ("CUR:amount"); retried when the balance changes. */
+  ignoredOthers: string[];
 }
 
 export const DEFAULT_STATE: BotState = {
@@ -69,6 +71,7 @@ export const DEFAULT_STATE: BotState = {
   lastResult: null,
   lastTickAt: null,
   lastWouldKey: null,
+  ignoredOthers: [],
 };
 
 const isNum = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);

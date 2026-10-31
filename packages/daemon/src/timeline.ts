@@ -7,7 +7,7 @@ const BTC_SYM = "tBTCUST";
 export interface Execution {
   rotationId: string;
   ts: number;
-  kind: "to_btc" | "to_xaut" | "to_usdt" | "reserve_xaut" | "sweep_btc" | "sweep_xaut";
+  kind: "to_btc" | "to_xaut" | "to_usdt" | "reserve_xaut" | "convert_ust" | "sweep_btc" | "sweep_xaut";
   /** Asset amounts that left / arrived in this rotation. */
   soldAsset: "XAUT" | "BTC" | null;
   sold: number;
@@ -62,6 +62,15 @@ export function buildExecutions(fills: FillRow[]): Execution[] {
       sold = b.sell.base;
       boughtAsset = "XAUT";
       bought = x.buy.base;
+    } else if (rotationId.startsWith("usdt:") && x.sell.base + b.sell.base + x.buy.base + b.buy.base === 0) {
+      // USD / other coin converted into USDT
+      kind = "convert_ust";
+      const other = fs.filter((f) => f.symbol !== XAUT_SYM && f.symbol !== BTC_SYM);
+      const usdBuy = other.some((f) => f.symbol === "tUSTUSD");
+      soldAsset = null;
+      sold = other.reduce((t, f) => t + (usdBuy ? f.base * f.price : f.base), 0);
+      boughtAsset = "USDT";
+      bought = other.reduce((t, f) => t + (usdBuy ? f.base : f.base * f.price), 0);
     } else if (rotationId.startsWith("usdt:") && (x.sell.base > 0 || b.sell.base > 0)) {
       kind = "to_usdt";
       soldAsset = x.sell.base > 0 ? "XAUT" : "BTC";

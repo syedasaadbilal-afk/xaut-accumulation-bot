@@ -1,5 +1,5 @@
 import type { StatusDto } from "../api.js";
-import { btnCls, cagrPct, card, formatAmount, formatCountdown, fmtPct, num, pctCls, type DisplayUnit } from "../format.js";
+import { btnCls, cagrPct, card, floor2, formatAmount, formatCountdown, fmtPct, num, pctCls, type DisplayUnit } from "../format.js";
 import { LarssonChart } from "./LarssonChart.js";
 import { LineChart } from "./LineChart.js";
 import { MetricTile } from "./MetricTile.js";
@@ -95,7 +95,7 @@ export function StatusTab({
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MetricTile label="USDT held (live)" value={w ? w.ustAvail.toFixed(2) : "-"} sublabel={s.state.strandedUst > 0 ? `${s.state.strandedUst.toFixed(2)} waiting to be swept` : undefined} />
+        <MetricTile label="USDT held (live)" value={w ? floor2(w.ustAvail) : "-"} sublabel={s.state.strandedUst > 0 ? `${floor2(s.state.strandedUst)} waiting to be swept` : undefined} />
         <MetricTile label="BTC held (live)" value={w ? w.btc.toFixed(8) : "-"} />
         <MetricTile label="XAUT held (live)" value={w ? w.xaut.toFixed(6) : "-"} />
         <MetricTile label="XAUT held back" value={num(s.caps.newMoney.heldBackXaut, 6)} sublabel="by the new-money cap" valueColor={s.caps.newMoney.heldBackXaut > 0 ? "text-amber-400" : "text-slate-100"} />
@@ -114,7 +114,7 @@ export function StatusTab({
         <MetricTile
           label="Reserves"
           value={s.config.xautReserve > 0 ? `${s.config.xautReserve} XAUT` : "off"}
-          sublabel={s.config.xautReserve > 0 ? (s.config.usdtReserve > 0 ? `of which ${s.config.usdtReserve} USDT parked (${w ? w.ustAvail.toFixed(2) : "-"} now)` : "no USDT carve-out") : undefined}
+          sublabel={s.config.xautReserve > 0 ? (s.config.usdtReserve > 0 ? `of which ${s.config.usdtReserve} USDT parked (${w ? floor2(w.ustAvail) : "-"} now)` : "no USDT carve-out") : undefined}
         />
         <MetricTile label="Position cap" value={s.config.positionCapXaut > 0 ? `${s.config.positionCapXaut} XAUT` : "off"} />
         <MetricTile label="Strategy XAUT gain" value={fmtPct(s.summary.signalXautReturnPct)} valueColor={pctCls(s.summary.signalXautReturnPct)} sublabel={`chart signals, cumulative · CAGR ${fmtPct(cagrPct(s.summary.signalXautReturnPct, s.trades[s.trades.length - 1]?.entryTime ?? null))}`} />

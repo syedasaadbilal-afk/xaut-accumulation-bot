@@ -82,7 +82,7 @@ describe("mirror larsson engine", () => {
 const baseInput = (over: Partial<PlanInput> = {}, state: Partial<BotState> = {}): PlanInput => ({
   cfg: cfg(),
   state: { ...DEFAULT_STATE, ...state },
-  wallets: { xaut: 10, btc: 0, xautAvail: 10, btcAvail: 0, ustAvail: 0 },
+  wallets: { xaut: 10, btc: 0, xautAvail: 10, btcAvail: 0, ustAvail: 0, others: [] },
   price: 0.04,
   usdPerXaut: 4000,
   usdPerBtc: 100_000,
@@ -206,6 +206,12 @@ describe("planTick", () => {
     expect((p.action as { btc: number }).btc).toBeCloseTo(0.08, 9); // 2 XAUT missing x 0.04 BTC
   });
 
+  it("XAUT reserve: idle USDT is spent on the pot before any BTC is sold", () => {
+    const p = planTick(baseInput({ cfg: cfg({ xautReserve: 1, minTradeUsd: 1 }), wallets: { xaut: 0.9965, btc: 0.4, xautAvail: 0.9965, btcAvail: 0.4, ustAvail: 12.36 } }));
+    expect(p.action).toMatchObject({ kind: "sweep", into: "xaut", idle: true });
+    expect((p.action as { ust: number }).ust).toBeCloseTo(12.36 * 0.999, 6); // all idle USDT (less than the $14 gap)
+  });
+
   it("USDT reserve: carved out of the XAUT reserve by selling XAUT, never the strategy position", () => {
     const c = cfg({ xautReserve: 3, usdtReserve: 4000 });
     const p = planTick(baseInput({ cfg: c, wallets: { xaut: 3, btc: 0.4, xautAvail: 3, btcAvail: 0.4, ustAvail: 0 } }));
@@ -228,6 +234,23 @@ describe("planTick", () => {
     const w = { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 1000 };
     const p = planTick(baseInput({ cfg: cfg({ xautReserve: 0, usdtReserve: 1000 }), wallets: w }));
     expect(p.action).toMatchObject({ kind: "sweep", into: "btc", idle: true });
+  });
+
+  it("converts any other balance (USD, other coins) into USDT before anything else", () => {
+    const w = { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 0, others: [] };
+    const p = planTick(baseInput({ cfg: cfg({ minTradeUsd: 1 }), wallets: w, others: [{ currency: "USD", available: 4.9, usd: 4.9 }] }));
+    expect(p.action).toEqual({ kind: "convert_other", currency: "USD", amount: 4.9, usd: 4.9 });
+    // below the $2 floor nothing is done
+    const q = planTick(baseInput({ cfg: cfg({ minTradeUsd: 1 }), wallets: w, others: [{ currency: "USD", available: 1.03, usd: 1.03 }] }));
+    expect(q.action.kind).toBe("none");
+  });
+
+  it("an idle sweep that cannot buy anything is parked until the balance changes", () => {
+    const w = { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 2.5, others: [] };
+    const c = cfg({ minTradeUsd: 1 });
+    expect(planTick(baseInput({ cfg: c, wallets: w })).action.kind).toBe("sweep");
+    expect(planTick(baseInput({ cfg: c, wallets: w }, { ignoredOthers: ["USDT:2.50"] })).action.kind).toBe("none");
+    expect(planTick(baseInput({ cfg: c, wallets: { ...w, ustAvail: 3.1 } }, { ignoredOthers: ["USDT:2.50"] })).action.kind).toBe("sweep");
   });
 
   it("clears stranded USDT that is no longer in the wallet", () => {
@@ -337,6 +360,35 @@ describe("runTick", () => {
     const r5 = await runTick({ ex, store, now: NOW + 240_000, pollMs: 0 });
     expect(r5.action).toBe("swept");
     expect(ex.wallets["UST"]).toBeLessThan(60);
+  });
+
+  it("LIVE: USD and other coins are converted to USDT, then swept into the strategy asset", async () => {
+    const store = newStore();
+    store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 1 }));
+    const ex = new FakeExchange({ closes: UP_CLOSES, btc: 0.1, usd: 4.9, prices: { ETH: 3000 } });
+    ex.wallets["ETH"] = 0.01; // ~$30 of an unrelated coin
+    const r1 = await runTick({ ex, store, now: NOW, pollMs: 0 });
+    expect(r1.action).toBe("converted");
+    const r2 = await runTick({ ex, store, now: NOW + 60_000, pollMs: 0 });
+    expect(r2.action).toBe("converted");
+    expect(ex.wallets["USD"]!).toBeLessThan(0.1);
+    expect(ex.wallets["ETH"]!).toBeLessThan(0.0001);
+    expect(ex.wallets["UST"]!).toBeGreaterThan(30);
+    expect(store.fills().every((f) => f.rotationId.startsWith("usdt:"))).toBe(true);
+    expect(buildExecutions(store.allFills()).some((e) => e.kind === "convert_ust")).toBe(true);
+    const r3 = await runTick({ ex, store, now: NOW + 120_000, pollMs: 0 });
+    expect(r3.action).toBe("swept"); // the USDT goes into BTC (strategy asset)
+    expect(ex.wallets["BTC"]!).toBeGreaterThan(0.1);
+    expect(store.deposits()).toHaveLength(0);
+  });
+
+  it("LIVE: a USD balance below the pair minimum is left alone and not retried every tick", async () => {
+    const store = newStore();
+    store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 1 }));
+    const ex = new FakeExchange({ closes: UP_CLOSES, btc: 0.1, usd: 1.5 });
+    const r1 = await runTick({ ex, store, now: NOW, pollMs: 0 });
+    expect(r1.action).toBe("idle"); // under the $2 floor: never attempted
+    expect(ex.orders).toHaveLength(0);
   });
 
   it("LIVE: new XAUT deposited later is detected, logged, and converted (cap off)", async () => {

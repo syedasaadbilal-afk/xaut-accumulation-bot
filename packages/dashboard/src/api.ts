@@ -45,7 +45,7 @@ export interface TradeDto {
 export interface ExecutionDto {
   rotationId: string;
   ts: number;
-  kind: "to_btc" | "to_xaut" | "to_usdt" | "reserve_xaut" | "sweep_btc" | "sweep_xaut";
+  kind: "to_btc" | "to_xaut" | "to_usdt" | "reserve_xaut" | "convert_ust" | "sweep_btc" | "sweep_xaut";
   soldAsset: "XAUT" | "BTC" | null;
   sold: number;
   boughtAsset: "XAUT" | "BTC" | "USDT";

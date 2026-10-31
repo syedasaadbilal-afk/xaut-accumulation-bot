@@ -25,6 +25,8 @@ export interface FakeOpts {
   xaut?: number;
   btc?: number;
   ust?: number;
+  usd?: number;
+  prices?: Record<string, number>;
   xautUst?: number;
   btcUst?: number;
   mode?: "DRY_RUN" | "LIVE";
@@ -40,10 +42,12 @@ export class FakeExchange implements Exchange {
   xautUst: number;
   btcUst: number;
   closes: number[];
+  prices: Record<string, number>;
 
   constructor(o: FakeOpts) {
     this.runMode = o.mode ?? "LIVE";
-    this.wallets = { XAUT: o.xaut ?? 0, BTC: o.btc ?? 0, UST: o.ust ?? 0 };
+    this.wallets = { XAUT: o.xaut ?? 0, BTC: o.btc ?? 0, UST: o.ust ?? 0, ...(o.usd !== undefined ? { USD: o.usd } : {}) };
+    this.prices = o.prices ?? {};
     this.xautUst = o.xautUst ?? 4000;
     this.btcUst = o.btcUst ?? 100000;
     this.closes = o.closes;
@@ -53,11 +57,21 @@ export class FakeExchange implements Exchange {
     return xautBtcPath(this.closes);
   }
   async getTicker(symbol: string): Promise<Ticker> {
-    const p = symbol === "tXAUT:UST" ? this.xautUst : symbol === "tBTCUST" ? this.btcUst : this.xautUst / this.btcUst;
+    const p = this.priceOf(symbol);
     return { bid: p * 0.9999, ask: p * 1.0001, last: p };
   }
-  async getMinOrderSize(): Promise<number> {
-    return 0.00001;
+  async getMinOrderSize(symbol: string): Promise<number> {
+    return symbol === "tUSTUSD" ? 2 : 0.00001;
+  }
+  private priceOf(symbol: string): number {
+    if (symbol === "tXAUT:UST") return this.xautUst;
+    if (symbol === "tBTCUST") return this.btcUst;
+    if (symbol === "tUSTUSD") return 1.0006;
+    if (symbol === "tXAUT:BTC") return this.xautUst / this.btcUst;
+    const m = /^t([A-Z]{2,10}):?UST$/.exec(symbol);
+    const px = m ? this.prices[m[1]!] : undefined;
+    if (px === undefined) throw new Error(`unknown symbol ${symbol}`);
+    return px;
   }
   async getWallets(): Promise<WalletBalance[]> {
     return Object.entries(this.wallets).map(([currency, balance]) => ({ currency, balance, availableBalance: balance }));
@@ -65,10 +79,11 @@ export class FakeExchange implements Exchange {
   async submitOrder(order: { symbol: string; amount: number; price: string }): Promise<SubmitResult> {
     if (this.runMode === "DRY_RUN") return { submitted: false, dryRun: true };
     this.orders.push(order);
-    const base = order.symbol === "tXAUT:UST" ? "XAUT" : "BTC";
-    const px = order.symbol === "tXAUT:UST" ? this.xautUst : this.btcUst;
+    const px = this.priceOf(order.symbol);
+    const base = order.symbol === "tXAUT:UST" ? "XAUT" : order.symbol === "tBTCUST" ? "BTC" : order.symbol === "tUSTUSD" ? "UST" : /^t([A-Z]{2,10}):?UST$/.exec(order.symbol)![1]!;
+    const quote = order.symbol === "tUSTUSD" ? "USD" : "UST";
     this.wallets[base] = (this.wallets[base] ?? 0) + order.amount;
-    this.wallets["UST"] = (this.wallets["UST"] ?? 0) - order.amount * px;
+    this.wallets[quote] = (this.wallets[quote] ?? 0) - order.amount * px;
     const id = String(this.nextId++);
     this.filled.set(id, { active: false, filled: Math.abs(order.amount), original: Math.abs(order.amount), avgPrice: px });
     return { submitted: true, dryRun: false, orderId: id };
