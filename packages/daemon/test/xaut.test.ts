@@ -195,31 +195,39 @@ describe("planTick", () => {
     expect(p.action.kind).toBe("none");
   });
 
-  it("USDT reserve: sells the position into USDT up to the shortfall", () => {
-    const c = cfg({ usdtReserve: 1000 });
-    const p = planTick(baseInput({ cfg: c, wallets: { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 0 } }));
-    expect(p.action).toEqual({ kind: "raise_usdt", from: "btc", usd: 1000, base: 0.4 });
-    // a partly filled reserve only asks for what is missing
-    const q = planTick(baseInput({ cfg: c, wallets: { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 600 } }));
-    expect((q.action as { usd: number }).usd).toBeCloseTo(400, 9);
+  it("XAUT reserve: stays out of the strategy conversion", () => {
+    const p = planTick(baseInput({ cfg: cfg({ xautReserve: 3 }) }));
+    expect(p.action).toEqual({ kind: "to_btc", xaut: 7 }); // 10 XAUT held, 3 kept back as the pot
   });
 
-  it("USDT reserve: sells the asset the strategy is not after first", () => {
-    const c = cfg({ usdtReserve: 1000 });
-    const w = { xaut: 10, btc: 0.4, xautAvail: 10, btcAvail: 0.4, ustAvail: 0 };
-    expect((planTick(baseInput({ cfg: c, wallets: w, desiredBtc: true })).action as { from: string }).from).toBe("xaut");
-    expect((planTick(baseInput({ cfg: c, wallets: w, desiredBtc: false })).action as { from: string }).from).toBe("btc");
+  it("XAUT reserve: built from BTC when the wallet is short", () => {
+    const p = planTick(baseInput({ cfg: cfg({ xautReserve: 3 }), wallets: { xaut: 1, btc: 0.4, xautAvail: 1, btcAvail: 0.4, ustAvail: 0 } }));
+    expect(p.action.kind).toBe("reserve_xaut");
+    expect((p.action as { btc: number }).btc).toBeCloseTo(0.08, 9); // 2 XAUT missing x 0.04 BTC
   });
 
-  it("USDT reserve: a filled reserve is left alone, extra USDT above it is swept, and 0 releases it all", () => {
-    const w = (ust: number) => ({ xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: ust });
-    expect(planTick(baseInput({ cfg: cfg({ usdtReserve: 1000 }), wallets: w(1000) })).action.kind).toBe("none");
-    expect(planTick(baseInput({ cfg: cfg({ usdtReserve: 1000 }), wallets: w(1010) })).action.kind).toBe("none"); // under the sweep minimum
-    const extra = planTick(baseInput({ cfg: cfg({ usdtReserve: 1000 }), wallets: w(1100) }));
-    expect(extra.action.kind).toBe("sweep");
-    expect((extra.action as { ust: number }).ust).toBeCloseTo(1100 * 0.999 - 1000, 6);
-    const released = planTick(baseInput({ cfg: cfg({ usdtReserve: 0 }), wallets: w(1000) }));
-    expect(released.action).toMatchObject({ kind: "sweep", into: "btc", idle: true });
+  it("USDT reserve: carved out of the XAUT reserve by selling XAUT, never the strategy position", () => {
+    const c = cfg({ xautReserve: 3, usdtReserve: 4000 });
+    const p = planTick(baseInput({ cfg: c, wallets: { xaut: 3, btc: 0.4, xautAvail: 3, btcAvail: 0.4, ustAvail: 0 } }));
+    expect(p.action).toEqual({ kind: "raise_usdt", usd: 4000, base: 3 });
+    // pot in place (2 XAUT + 4000 USDT = 3 XAUT): nothing to do and the 2 XAUT are not converted
+    const q = planTick(baseInput({ cfg: c, wallets: { xaut: 2, btc: 0.4, xautAvail: 2, btcAvail: 0.4, ustAvail: 4000 } }));
+    expect(q.action.kind).toBe("none");
+    // pot empty: build XAUT from BTC first, do not sell BTC for USDT
+    const r = planTick(baseInput({ cfg: c, wallets: { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 0 } }));
+    expect(r.action.kind).toBe("reserve_xaut");
+  });
+
+  it("USDT reserve: capped at the value of the XAUT reserve", () => {
+    const c = cfg({ xautReserve: 1, usdtReserve: 99_999 });
+    const p = planTick(baseInput({ cfg: c, wallets: { xaut: 1, btc: 0.4, xautAvail: 1, btcAvail: 0.4, ustAvail: 0 } }));
+    expect((p.action as { usd: number }).usd).toBeCloseTo(4000, 6);
+  });
+
+  it("USDT reserve does nothing while the XAUT reserve is 0: USDT in the wallet is idle and swept", () => {
+    const w = { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 1000 };
+    const p = planTick(baseInput({ cfg: cfg({ xautReserve: 0, usdtReserve: 1000 }), wallets: w }));
+    expect(p.action).toMatchObject({ kind: "sweep", into: "btc", idle: true });
   });
 
   it("clears stranded USDT that is no longer in the wallet", () => {
@@ -302,30 +310,33 @@ describe("runTick", () => {
     expect(store.deposits()).toHaveLength(0);
   });
 
-  it("LIVE: USDT reserve sells BTC into USDT only, is not mistaken for a trade, and releases at 0", async () => {
+  it("LIVE: XAUT reserve is built from BTC, USDT is carved out of it, and everything releases at 0", async () => {
     const store = newStore();
-    store.setConfig(cfg({ chunkUsd: 5000, usdtReserve: 2500 }));
+    store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 100, xautReserve: 2 }));
     const ex = new FakeExchange({ closes: UP_CLOSES, btc: 0.1 }); // ~ $10,000 of BTC, strategy wants BTC
-    const r = await runTick({ ex, store, now: NOW, pollMs: 0 });
-    expect(r.action).toBe("raised");
-    expect(Math.abs(ex.wallets["UST"]! - 2500)).toBeLessThan(1);
-    expect(ex.wallets["BTC"]).toBeCloseTo(0.075, 4);
-    expect(ex.orders.every((o) => o.amount < 0)).toBe(true); // sells only, no buy leg
-    const fills = store.fills();
-    expect(fills.every((f) => f.rotationId.startsWith("usdt:"))).toBe(true);
-    expect(buildExecutions(store.allFills())[0]!.kind).toBe("to_usdt");
-    // next tick: nothing to do, and the sale is not read as a withdrawal
-    const r2 = await runTick({ ex, store, now: NOW + 60_000, pollMs: 0 });
-    expect(r2.action).toBe("idle");
+    const r1 = await runTick({ ex, store, now: NOW, pollMs: 0 });
+    expect(r1.action).toBe("reserved");
+    expect(ex.wallets["XAUT"]).toBeGreaterThan(1.9);
+    expect(ex.wallets["BTC"]).toBeCloseTo(0.02, 2);
+    expect(store.fills().every((f) => f.rotationId.startsWith("xres:"))).toBe(true);
+    expect((await runTick({ ex, store, now: NOW + 60_000, pollMs: 0 })).action).toBe("idle"); // reserve stays XAUT, not converted to BTC
     expect(store.deposits()).toHaveLength(0);
-    // account value still counts the parked USDT
-    expect(store.snapshots().at(-1)!.equityXaut).toBeCloseTo(0.1 / 0.04 * 0.0 + (0.075 / 0.04 * 1) + 2500 / 4000, 1);
-    // release: reserve back to 0 puts the USDT to work in BTC
-    store.setConfig(cfg({ chunkUsd: 5000, usdtReserve: 0 }));
+
+    // carve 4,000 USDT out of the XAUT pot
+    store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 100, xautReserve: 2, usdtReserve: 4000 }));
     const r3 = await runTick({ ex, store, now: NOW + 120_000, pollMs: 0 });
-    expect(r3.action).toBe("swept");
-    expect(ex.wallets["UST"]).toBeLessThan(25); // ~0.5% order-price buffer left over; the next tick sweeps it
-    expect(ex.wallets["BTC"]).toBeCloseTo(0.1, 2);
+    expect(r3.action).toBe("raised");
+    expect(Math.abs(ex.wallets["UST"]! - 4000)).toBeLessThan(1);
+    expect(ex.wallets["BTC"]).toBeCloseTo(0.02, 2); // strategy position untouched
+    expect(buildExecutions(store.allFills()).map((e) => e.kind).sort()).toEqual(["reserve_xaut", "to_usdt"]);
+    expect((await runTick({ ex, store, now: NOW + 180_000, pollMs: 0 })).action).toBe("idle");
+    expect(store.snapshots().at(-1)!.equityXaut).toBeCloseTo(0.02 / 0.04 + 1.0 + 4000 / 4000, 0);
+
+    // release: XAUT reserve off -> the USDT is idle and goes into BTC; the XAUT follows the strategy
+    store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 100, xautReserve: 0, usdtReserve: 4000 }));
+    const r5 = await runTick({ ex, store, now: NOW + 240_000, pollMs: 0 });
+    expect(r5.action).toBe("swept");
+    expect(ex.wallets["UST"]).toBeLessThan(60);
   });
 
   it("LIVE: new XAUT deposited later is detected, logged, and converted (cap off)", async () => {

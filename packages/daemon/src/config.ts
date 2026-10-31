@@ -26,7 +26,12 @@ export interface BotConfig {
   minTradeUsd: number;
   /** Max XAUT-equivalent allowed to sit in BTC at once. 0 = no limit. */
   positionCapXaut: number;
-  /** USDT to keep parked in the wallet. The bot sells its position (stray asset first) to reach it; 0 = off. */
+  /** XAUT pot kept out of the strategy. Built from BTC when short. 0 = off. */
+  xautReserve: number;
+  /**
+   * USDT to park, carved out of the XAUT reserve only (the strategy position is never sold for it).
+   * Has no effect while xautReserve is 0. Capped at the value of the XAUT reserve.
+   */
   usdtReserve: number;
   strategyCap: { enabled: boolean; maxDistPct: number };
   newMoneyCap: { enabled: boolean; maxDistPct: number; minLumpPct: number };
@@ -38,6 +43,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   chunkUsd: 2000,
   minTradeUsd: 25,
   positionCapXaut: 0,
+  xautReserve: 0,
   usdtReserve: 0,
   strategyCap: { enabled: false, maxDistPct: 5 },
   newMoneyCap: { enabled: false, maxDistPct: 5, minLumpPct: 0 },
@@ -78,6 +84,8 @@ export function parseConfig(b: unknown): { config: BotConfig } | { error: string
   if (!isNum(x.positionCapXaut) || x.positionCapXaut < 0) return { error: "positionCapXaut must be 0 (no limit) or more" };
   const reserve = x.usdtReserve === undefined ? 0 : x.usdtReserve;
   if (!isNum(reserve) || reserve < 0 || reserve > 100_000_000) return { error: "usdtReserve must be 0 (off) or more" };
+  const xres = x.xautReserve === undefined ? 0 : x.xautReserve;
+  if (!isNum(xres) || xres < 0 || xres > 1_000_000) return { error: "xautReserve must be 0 (off) or more" };
   const s = x.strategyCap;
   if (!s || typeof s.enabled !== "boolean" || !isNum(s.maxDistPct) || s.maxDistPct <= 0 || s.maxDistPct > 100) {
     return { error: "strategyCap needs enabled and maxDistPct in (0, 100]" };
@@ -93,6 +101,7 @@ export function parseConfig(b: unknown): { config: BotConfig } | { error: string
       chunkUsd: x.chunkUsd,
       minTradeUsd: x.minTradeUsd,
       positionCapXaut: x.positionCapXaut,
+      xautReserve: xres,
       usdtReserve: reserve,
       strategyCap: { enabled: s.enabled, maxDistPct: s.maxDistPct },
       newMoneyCap: { enabled: n.enabled, maxDistPct: n.maxDistPct, minLumpPct: n.minLumpPct },

@@ -123,7 +123,7 @@ export class XautService {
       usdPerBtc,
       wallets,
       walletRows,
-      equityXaut: wallets && price && usdPerXaut ? wallets.xaut + wallets.btc / price + parkedUst(wallets, cfg, state.strandedUst) / usdPerXaut : null,
+      equityXaut: wallets && price && usdPerXaut ? wallets.xaut + wallets.btc / price + parkedUst(wallets, cfg, state.strandedUst, usdPerXaut) / usdPerXaut : null,
       holding,
       desired: analysis ? (analysis.desiredBtc ? "BTC" : "XAUT") : null,
       desiredUncapped: analysis ? (analysis.desiredBtcUncapped ? "BTC" : "XAUT") : null,

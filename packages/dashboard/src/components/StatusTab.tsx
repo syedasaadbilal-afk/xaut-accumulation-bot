@@ -111,7 +111,11 @@ export function StatusTab({
           sublabel={s.caps.newMoney.enabled ? (s.caps.newMoney.wouldHoldBackNow ? "a deposit would be held" : "a deposit would deploy") : undefined}
           valueColor={s.caps.newMoney.wouldHoldBackNow ? "text-amber-400" : "text-slate-100"}
         />
-        <MetricTile label="USDT reserve" value={s.config.usdtReserve > 0 ? s.config.usdtReserve.toFixed(2) : "off"} sublabel={s.config.usdtReserve > 0 && w ? `${w.ustAvail.toFixed(2)} parked now` : undefined} />
+        <MetricTile
+          label="Reserves"
+          value={s.config.xautReserve > 0 ? `${s.config.xautReserve} XAUT` : "off"}
+          sublabel={s.config.xautReserve > 0 ? (s.config.usdtReserve > 0 ? `of which ${s.config.usdtReserve} USDT parked (${w ? w.ustAvail.toFixed(2) : "-"} now)` : "no USDT carve-out") : undefined}
+        />
         <MetricTile label="Position cap" value={s.config.positionCapXaut > 0 ? `${s.config.positionCapXaut} XAUT` : "off"} />
         <MetricTile label="Strategy XAUT gain" value={fmtPct(s.summary.signalXautReturnPct)} valueColor={pctCls(s.summary.signalXautReturnPct)} sublabel={`chart signals, cumulative · CAGR ${fmtPct(cagrPct(s.summary.signalXautReturnPct, s.trades[s.trades.length - 1]?.entryTime ?? null))}`} />
       </div>
