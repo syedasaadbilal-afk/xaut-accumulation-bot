@@ -1,5 +1,5 @@
-import type { StatusDto } from "../api.js";
-import { btnCls, cagrPct, card, floor2, formatAmount, formatCountdown, fmtPct, num, pctCls, type DisplayUnit } from "../format.js";
+import { resetPerformance, type StatusDto } from "../api.js";
+import { btnCls, cagrPct, card, fmtDate, floor2, formatAmount, formatCountdown, fmtPct, num, pctCls, type DisplayUnit } from "../format.js";
 import { LarssonChart } from "./LarssonChart.js";
 import { LineChart } from "./LineChart.js";
 import { MetricTile } from "./MetricTile.js";
@@ -53,7 +53,15 @@ export function StatusTab({
               <div className="text-[11px] tracking-wider text-slate-500 uppercase mb-1">Account value</div>
               <div className="text-4xl font-bold text-slate-100">{s.equityXaut === null ? "-" : formatAmount(s.equityXaut, px, unit)}</div>
               <div className={`text-sm mt-1 ${pctCls(s.summary.accountXautReturnPct)}`}>
-                {s.summary.accountXautReturnPct === null ? "XAUT gain: building history" : `${fmtPct(s.summary.accountXautReturnPct)} in XAUT since start (deposits removed)`}
+                {s.summary.accountXautReturnPct === null ? "XAUT gain: building history" : `${fmtPct(s.summary.accountXautReturnPct)} in XAUT since ${s.state.perfSince ? fmtDate(s.state.perfSince / 1000) : "start"} (deposits removed)`}
+                <button
+                  className="ml-3 text-xs text-slate-500 underline hover:text-slate-300"
+                  onClick={() => {
+                    if (window.confirm("Reset the since-start percentage to 0 and measure from now? Trades and history are not affected.")) void resetPerformance().then(() => window.location.reload());
+                  }}
+                >
+                  reset to 0
+                </button>
               </div>
             </div>
             <div className="text-right">

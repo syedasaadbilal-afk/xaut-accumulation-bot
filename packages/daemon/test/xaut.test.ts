@@ -389,6 +389,46 @@ describe("runTick", () => {
     expect(ex.wallets["UST"]).toBeLessThan(60);
   });
 
+  it("LIVE: with real exchange minimums the last reserve gap closes once and then the bot stays idle", async () => {
+    const store = newStore();
+    store.setConfig(cfg({ chunkUsd: 2000, minTradeUsd: 1, xautReserve: 3.5 }));
+    const ex = new FakeExchange({ closes: UP_CLOSES, xaut: 3.498766, btc: 0.4, mins: { "tXAUT:UST": 0.002, tBTCUST: 0.00004 } });
+    let last = "";
+    for (let k = 0; k < 6 && last !== "idle"; k++) last = (await runTick({ ex, store, now: NOW + k * 60_000, pollMs: 0 })).action;
+    expect(last).toBe("idle");
+    expect(ex.wallets["XAUT"]!).toBeGreaterThanOrEqual(3.5);
+    expect(ex.wallets["XAUT"]!).toBeLessThan(3.5 + 0.0025); // overshoots by less than one minimum order
+    const orders = ex.orders.length;
+    for (let k = 10; k < 14; k++) expect((await runTick({ ex, store, now: NOW + k * 60_000, pollMs: 0 })).action).toBe("idle");
+    expect(ex.orders.length).toBe(orders); // no further orders: no loop on the leftover
+  });
+
+  it("LIVE: a transfer that happens during a rotation is logged as a withdrawal, not absorbed", async () => {
+    const store = newStore();
+    store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 100 }));
+    const ex = new FakeExchange({ closes: UP_CLOSES, xaut: 4 }); // ~ $16,000, strategy wants BTC: 4 chunks
+    const orig = ex.submitOrder.bind(ex);
+    let n = 0;
+    ex.submitOrder = async (o) => {
+      const r = await orig(o);
+      if (++n === 3) ex.wallets["BTC"] = (ex.wallets["BTC"] ?? 0) - 0.01; // 0.01 BTC (~$1,000) leaves mid-rotation
+      return r;
+    };
+    const r1 = await runTick({ ex, store, now: NOW, pollMs: 0 });
+    expect(r1.action).toBe("rotated");
+    const deps = store.deposits();
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.asset).toBe("BTC");
+    expect(deps[0]!.amount).toBeCloseTo(-0.01, 6);
+    expect(deps[0]!.action).toContain("withdrawal");
+    // and the bot's own trades alone are never logged as deposits
+    const store2 = newStore();
+    store2.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 100 }));
+    const ex2 = new FakeExchange({ closes: UP_CLOSES, xaut: 4 });
+    await runTick({ ex: ex2, store: store2, now: NOW, pollMs: 0 });
+    expect(store2.deposits()).toHaveLength(0);
+  });
+
   it("LIVE: USD and other coins are converted to USDT, then swept into the strategy asset", async () => {
     const store = newStore();
     store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 1 }));

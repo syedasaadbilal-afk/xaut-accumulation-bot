@@ -116,7 +116,7 @@ export class XautService {
     return {
       configured,
       config: cfg,
-      state: { heldBackXaut: state.heldBackXaut, strandedUst: state.strandedUst, lastResult: state.lastResult, lastTickAt: state.lastTickAt },
+      state: { heldBackXaut: state.heldBackXaut, strandedUst: state.strandedUst, lastResult: state.lastResult, lastTickAt: state.lastTickAt, perfSince: state.perfSince },
       error,
       price,
       usdPerXaut,
@@ -154,7 +154,7 @@ export class XautService {
         closed: trades.filter((t) => t.status === "closed").length,
         wins: trades.filter((t) => t.status === "closed" && (t.xautReturnPct ?? 0) > 0).length,
         signalXautReturnPct: trades.length ? compound(trades.map((t) => t.xautReturnPct)) : 0,
-        accountXautReturnPct: twrXautPct(snaps, deposits),
+        accountXautReturnPct: twrXautPct(state.perfSince ? snaps.filter((x) => x.ts >= (state.perfSince as number)) : snaps, deposits),
         actualClosed: actualClosed.length,
         actualWins: actualClosed.filter((t) => (t.actual?.pnlXaut ?? 0) > 0).length,
         actualNetPnlXaut: trades.reduce((s, t) => s + (t.actual?.pnlXaut ?? 0), 0),
