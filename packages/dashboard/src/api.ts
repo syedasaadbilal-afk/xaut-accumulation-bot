@@ -6,6 +6,7 @@ export interface BotConfigDto {
   chunkUsd: number;
   minTradeUsd: number;
   positionCapXaut: number;
+  reservesEnabled: boolean;
   xautReserve: number;
   usdtReserve: number;
   strategyCap: { enabled: boolean; maxDistPct: number };

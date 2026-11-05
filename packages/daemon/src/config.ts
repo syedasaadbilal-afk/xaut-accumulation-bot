@@ -26,6 +26,8 @@ export interface BotConfig {
   minTradeUsd: number;
   /** Max XAUT-equivalent allowed to sit in BTC at once. 0 = no limit. */
   positionCapXaut: number;
+  /** Tick box: reserves are only applied while this is on (the amounts are kept when it is off). */
+  reservesEnabled: boolean;
   /** XAUT pot kept out of the strategy. Built from BTC when short. 0 = off. */
   xautReserve: number;
   /**
@@ -43,6 +45,7 @@ export const DEFAULT_CONFIG: BotConfig = {
   chunkUsd: 2000,
   minTradeUsd: 25,
   positionCapXaut: 0,
+  reservesEnabled: true,
   xautReserve: 0,
   usdtReserve: 0,
   strategyCap: { enabled: false, maxDistPct: 5 },
@@ -89,6 +92,7 @@ export function parseConfig(b: unknown): { config: BotConfig } | { error: string
   if (!isNum(reserve) || reserve < 0 || reserve > 100_000_000) return { error: "usdtReserve must be 0 (off) or more" };
   const xres = x.xautReserve === undefined ? 0 : x.xautReserve;
   if (!isNum(xres) || xres < 0 || xres > 1_000_000) return { error: "xautReserve must be 0 (off) or more" };
+  if (x.reservesEnabled !== undefined && typeof x.reservesEnabled !== "boolean") return { error: "reservesEnabled must be true or false" };
   const s = x.strategyCap;
   if (!s || typeof s.enabled !== "boolean" || !isNum(s.maxDistPct) || s.maxDistPct <= 0 || s.maxDistPct > 100) {
     return { error: "strategyCap needs enabled and maxDistPct in (0, 100]" };
@@ -104,6 +108,7 @@ export function parseConfig(b: unknown): { config: BotConfig } | { error: string
       chunkUsd: x.chunkUsd,
       minTradeUsd: x.minTradeUsd,
       positionCapXaut: x.positionCapXaut,
+      reservesEnabled: x.reservesEnabled ?? true,
       xautReserve: xres,
       usdtReserve: reserve,
       strategyCap: { enabled: s.enabled, maxDistPct: s.maxDistPct },

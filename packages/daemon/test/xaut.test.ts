@@ -184,8 +184,8 @@ describe("planTick", () => {
   it("sweeps idle USDT in the wallet even when nothing is tracked as stranded", () => {
     const p = planTick(baseInput({ cfg: cfg({ minTradeUsd: 1 }), wallets: { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 21.29 } }));
     expect(p.action.kind).toBe("sweep");
-    expect((p.action as { ust: number }).ust).toBeCloseTo(21.29 * 0.999, 6);
-    const dust = planTick(baseInput({ cfg: cfg({ minTradeUsd: 1 }), wallets: { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 2 } }));
+    expect((p.action as { ust: number }).ust).toBeCloseTo(21.29, 6);
+    const dust = planTick(baseInput({ cfg: cfg({ minTradeUsd: 1 }), wallets: { xaut: 0, btc: 0.4, xautAvail: 0, btcAvail: 0.4, ustAvail: 1.9 } }));
     expect(dust.action.kind).toBe("none");
   });
 
@@ -209,7 +209,27 @@ describe("planTick", () => {
   it("XAUT reserve: idle USDT is spent on the pot before any BTC is sold", () => {
     const p = planTick(baseInput({ cfg: cfg({ xautReserve: 1, minTradeUsd: 1 }), wallets: { xaut: 0.9965, btc: 0.4, xautAvail: 0.9965, btcAvail: 0.4, ustAvail: 12.36 } }));
     expect(p.action).toMatchObject({ kind: "sweep", into: "xaut", idle: true });
-    expect((p.action as { ust: number }).ust).toBeCloseTo(12.36 * 0.999, 6); // all idle USDT (less than the $14 gap)
+    expect((p.action as { ust: number }).ust).toBeCloseTo(12.36, 6); // all idle USDT (less than the $14 gap)
+  });
+
+  it("XAUT reserve: a last gap below the exchange minimum is closed with the minimum order", () => {
+    // 3.498766 of 3.5 held: gap 0.001234 XAUT (~$4.9) is under the 0.002 XAUT minimum order
+    const w = { xaut: 3.498766, btc: 0.4, xautAvail: 3.498766, btcAvail: 0.4, ustAvail: 0 };
+    const p = planTick(baseInput({ cfg: cfg({ xautReserve: 3.5, minTradeUsd: 1 }), wallets: w }));
+    expect(p.action.kind).toBe("reserve_xaut");
+    // buys 0.0021 XAUT (price 0.04 BTC per XAUT) so the reserve ends just above 3.5
+    expect((p.action as { btc: number }).btc).toBeCloseTo(0.0021 * 0.04, 9);
+    // a gap under 0.00001 XAUT is left alone
+    const q = planTick(baseInput({ cfg: cfg({ xautReserve: 3.5, minTradeUsd: 1 }), wallets: { ...w, xaut: 3.499995, xautAvail: 3.499995 } }));
+    expect(q.action.kind).not.toBe("reserve_xaut");
+  });
+
+  it("reserves tick box off: the reserve amounts are ignored", () => {
+    const w = { xaut: 3, btc: 0.4, xautAvail: 3, btcAvail: 0.4, ustAvail: 0 };
+    const on = planTick(baseInput({ cfg: cfg({ xautReserve: 3, usdtReserve: 1000 }), wallets: w }));
+    expect(on.action.kind).toBe("raise_usdt");
+    const off = planTick(baseInput({ cfg: cfg({ reservesEnabled: false, xautReserve: 3, usdtReserve: 1000 }), wallets: w }));
+    expect(off.action).toEqual({ kind: "to_btc", xaut: 3 }); // everything follows the strategy again
   });
 
   it("USDT reserve: carved out of the XAUT reserve by selling XAUT, never the strategy position", () => {
@@ -342,22 +362,29 @@ describe("runTick", () => {
     expect(ex.wallets["XAUT"]).toBeGreaterThan(1.9);
     expect(ex.wallets["BTC"]).toBeCloseTo(0.02, 2);
     expect(store.fills().every((f) => f.rotationId.startsWith("xres:"))).toBe(true);
-    expect((await runTick({ ex, store, now: NOW + 60_000, pollMs: 0 })).action).toBe("idle"); // reserve stays XAUT, not converted to BTC
+    // a small last top-up may still run (closing the gap to the minimum order); then it settles at or above 2 XAUT
+    let settle = "";
+    for (let k = 1; k <= 4 && settle !== "idle"; k++) settle = (await runTick({ ex, store, now: NOW + k * 60_000, pollMs: 0 })).action;
+    expect(settle).toBe("idle"); // reserve stays XAUT, not converted to BTC
+    expect(ex.wallets["XAUT"]).toBeGreaterThanOrEqual(2 - 1e-6);
     expect(store.deposits()).toHaveLength(0);
 
     // carve 4,000 USDT out of the XAUT pot
     store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 100, xautReserve: 2, usdtReserve: 4000 }));
-    const r3 = await runTick({ ex, store, now: NOW + 120_000, pollMs: 0 });
+    const r3 = await runTick({ ex, store, now: NOW + 600_000, pollMs: 0 });
     expect(r3.action).toBe("raised");
     expect(Math.abs(ex.wallets["UST"]! - 4000)).toBeLessThan(1);
     expect(ex.wallets["BTC"]).toBeCloseTo(0.02, 2); // strategy position untouched
-    expect(buildExecutions(store.allFills()).map((e) => e.kind).sort()).toEqual(["reserve_xaut", "to_usdt"]);
-    expect((await runTick({ ex, store, now: NOW + 180_000, pollMs: 0 })).action).toBe("idle");
+    const kinds = buildExecutions(store.allFills()).map((e) => e.kind);
+    expect(kinds).toContain("reserve_xaut");
+    expect(kinds).toContain("to_usdt");
+    expect(kinds.every((k) => ["reserve_xaut", "to_usdt", "sweep_xaut"].includes(k))).toBe(true); // a last top-up may show as a sweep
+    expect((await runTick({ ex, store, now: NOW + 660_000, pollMs: 0 })).action).toBe("idle");
     expect(store.snapshots().at(-1)!.equityXaut).toBeCloseTo(0.02 / 0.04 + 1.0 + 4000 / 4000, 0);
 
     // release: XAUT reserve off -> the USDT is idle and goes into BTC; the XAUT follows the strategy
     store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 100, xautReserve: 0, usdtReserve: 4000 }));
-    const r5 = await runTick({ ex, store, now: NOW + 240_000, pollMs: 0 });
+    const r5 = await runTick({ ex, store, now: NOW + 720_000, pollMs: 0 });
     expect(r5.action).toBe("swept");
     expect(ex.wallets["UST"]).toBeLessThan(60);
   });
@@ -376,7 +403,7 @@ describe("runTick", () => {
     expect(ex.wallets["UST"]!).toBeGreaterThan(30);
     expect(store.fills().every((f) => f.rotationId.startsWith("usdt:"))).toBe(true);
     expect(buildExecutions(store.allFills()).some((e) => e.kind === "convert_ust")).toBe(true);
-    const r3 = await runTick({ ex, store, now: NOW + 120_000, pollMs: 0 });
+    const r3 = await runTick({ ex, store, now: NOW + 600_000, pollMs: 0 });
     expect(r3.action).toBe("swept"); // the USDT goes into BTC (strategy asset)
     expect(ex.wallets["BTC"]!).toBeGreaterThan(0.1);
     expect(store.deposits()).toHaveLength(0);
@@ -389,6 +416,40 @@ describe("runTick", () => {
     const r1 = await runTick({ ex, store, now: NOW, pollMs: 0 });
     expect(r1.action).toBe("idle"); // under the $2 floor: never attempted
     expect(ex.orders).toHaveLength(0);
+  });
+
+  it("LIVE: stranded USDT too small for the pair minimum does not block the rotation", async () => {
+    const store = newStore();
+    store.setConfig(cfg({ chunkUsd: 5000, minTradeUsd: 1 }));
+    store.setState({ ...DEFAULT_STATE, strandedUst: 8.11 });
+    // strategy wants XAUT (crash); XAUT minimum order is 0.01 (= $40) so 8.11 USDT cannot buy any
+    const ex = new FakeExchange({ closes: DOWN_CLOSES, btc: 0.1, ust: 8.11, mins: { "tXAUT:UST": 0.01 } });
+    const NOW2 = nowAfter(DOWN_CLOSES.length);
+    const r1 = await runTick({ ex, store, now: NOW2, pollMs: 0 });
+    expect(r1.action).toBe("swept"); // tried, bought nothing
+    expect(ex.orders).toHaveLength(0);
+    const r2 = await runTick({ ex, store, now: NOW2 + 60_000, pollMs: 0 });
+    expect(r2.action).toBe("rotated"); // no longer stuck: BTC goes into XAUT
+    expect(ex.wallets["BTC"]!).toBeLessThan(0.01);
+    expect(ex.wallets["XAUT"]!).toBeGreaterThan(2);
+  });
+
+  it("PAUSED mid-rotation: the order in flight finishes, then no further orders are placed", async () => {
+    const store = newStore();
+    store.setConfig(cfg({ chunkUsd: 1000 }));
+    const ex = new FakeExchange({ closes: UP_CLOSES, xaut: 10 }); // $40,000 to convert = many chunks
+    const orig = ex.submitOrder.bind(ex);
+    let n = 0;
+    ex.submitOrder = async (o) => {
+      const r = await orig(o);
+      if (++n === 2) store.setConfig(cfg({ chunkUsd: 1000, enabled: false })); // user clicks PAUSED after chunk 1 (sell + buy)
+      return r;
+    };
+    const r = await runTick({ ex, store, now: NOW, pollMs: 0 });
+    expect(ex.orders).toHaveLength(2); // one full sell+buy pair, nothing more
+    expect(r.detail).toMatch(/paused/);
+    expect(ex.wallets["XAUT"]!).toBeGreaterThan(9); // the rest was not converted
+    expect(store.getState().strandedUst).toBe(0);
   });
 
   it("LIVE: new XAUT deposited later is detected, logged, and converted (cap off)", async () => {

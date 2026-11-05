@@ -18,6 +18,7 @@ function Settings({ s, reload }: { s: StatusDto; reload: () => Promise<void> }) 
   const [minTrade, setMinTrade] = useState(String(c.minTradeUsd));
   const [posCap, setPosCap] = useState(String(c.positionCapXaut));
   const [reserve, setReserve] = useState(String(c.usdtReserve ?? 0));
+  const [rEn, setREn] = useState(c.reservesEnabled ?? true);
   const [xres, setXres] = useState(String(c.xautReserve ?? 0));
   const [sEn, setSEn] = useState(c.strategyCap.enabled);
   const [sPct, setSPct] = useState(String(c.strategyCap.maxDistPct));
@@ -33,6 +34,7 @@ function Settings({ s, reload }: { s: StatusDto; reload: () => Promise<void> }) 
       chunkUsd: Number(chunk),
       minTradeUsd: Number(minTrade),
       positionCapXaut: Number(posCap),
+      reservesEnabled: rEn,
       xautReserve: Number(xres),
       usdtReserve: Number(reserve),
       strategyCap: { enabled: sEn, maxDistPct: Number(sPct) },
@@ -56,6 +58,10 @@ function Settings({ s, reload }: { s: StatusDto; reload: () => Promise<void> }) 
         <div className="border border-slate-800 rounded p-3 space-y-2">
           <div className="text-xs uppercase tracking-wider text-slate-400">Reserves (kept out of the strategy)</div>
           <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={rEn} onChange={(e) => setREn(e.target.checked)} />
+              Use it
+            </label>
             <NumField label="XAUT reserve" value={xres} onChange={setXres} suffix="XAUT (0 = off)" />
             <NumField label="of which parked as USDT" value={reserve} onChange={setReserve} suffix="USDT (0 = none)" />
           </div>

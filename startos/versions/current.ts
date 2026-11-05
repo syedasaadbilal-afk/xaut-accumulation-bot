@@ -1,9 +1,9 @@
 import { IMPOSSIBLE, VersionInfo } from '@start9labs/start-sdk'
 export const current = VersionInfo.of({
-  version: '0.1.8:0',
+  version: '0.1.13:0',
   releaseNotes: {
     en_US:
-      'Any balance that is not USDT, BTC or XAUT (USD, other coins with a USDT pair) is now converted to USDT and swept into the strategy asset. USD goes through USDT/USD; amounts below the pair minimum order are left alone. Reserves are never touched.',
+      'XAUT reserve now closes a last small gap below the exchange minimum order by buying the minimum, so the reserve ends at or just above the target (for example 3.5007 instead of 3.4988). New Use it tick box on the Reserves settings switches the reserves off and on without losing the amounts.',
   },
   migrations: { up: async ({ effects }) => {}, down: IMPOSSIBLE },
 })
